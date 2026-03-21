@@ -1,8 +1,8 @@
 # Technical Architecture — Preschool Communication Platform
 
-**Version:** 1.0
-**Date:** 2026-03-20
-**Status:** Draft for founder review
+**Version:** 1.1
+**Date:** 2026-03-21
+**Status:** Draft for founder review — updated to Node.js stack
 **Scope:** V1 architecture through Year 3 scale (~500 schools, ~60,000 children)
 
 ---
@@ -33,8 +33,8 @@
                           │                                               │
   ┌──────────────┐        │  ┌─────────────┐      ┌──────────────────┐  │
   │  Teacher App  │◄──────┼──►   API Server │      │  Background Jobs  │  │
-  │  (React Native│  HTTPS│  │  (Elixir /  │      │  (Oban workers)  │  │
-  │   + Expo)     │       │  │  Phoenix)   │◄─────►  - Media process │  │
+  │  (React Native│  HTTPS│  │  (Node.js / │      │  (BullMQ workers)│  │
+  │   + Expo)     │       │  │  Fastify)   │◄─────►  - Media process │  │
   └──────────────┘        │  │             │      │  - Notifications  │  │
                           │  │  REST + WS  │      │  - Retention/del  │  │
   ┌──────────────┐        │  └──────┬──────┘      │  - Audit flush    │  │
@@ -69,8 +69,8 @@ This is a **modular monolith** — a single deployable application with clearly 
 
 - **Operational complexity kills early-stage startups.** Microservices require distributed tracing, service meshes, and polyglot deployments. One engineer cannot operate this effectively.
 - **The domain boundaries are not yet proven.** You do not have enough real-world usage to know where the seams should be. A modular monolith lets you split later with confidence.
-- **At Year 3 scale (500 schools, 60,000 children), a single Elixir node handles this comfortably.** This is not a high-throughput system. It is a data-privacy-sensitive, moderate-concurrency system.
-- **Elixir's OTP process model gives you microservice-like isolation within a monolith** — each module has its own supervision tree, message passing, and fault isolation without network hops.
+- **At Year 3 scale (500 schools, 60,000 children), a single Node.js node handles this comfortably.** This is not a high-throughput system. It is a data-privacy-sensitive, moderate-concurrency system.
+- **TypeScript enforces module boundaries at compile time** — each module has its own clearly scoped API, and cross-module imports are kept explicit and intentional.
 
 The monolith is NOT a compromise. It is the deliberate architecture for this scale and team size.
 
@@ -78,13 +78,13 @@ The monolith is NOT a compromise. It is the deliberate architecture for this sca
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Backend runtime | Elixir / Phoenix | Concurrency, WebSockets at scale, fault tolerance, EU ecosystem |
+| Backend runtime | Node.js 22 LTS + Fastify + TypeScript | Engineer fluency, strong ecosystem, handles V1-V3 scale comfortably |
 | Mobile | React Native + Expo | Single codebase, offline support, large ecosystem, Expo EAS for OTA |
 | Frontend web | Next.js (React) | Code sharing with mobile, SSR for SEO, strong ecosystem |
 | Database | PostgreSQL (single cluster) | Row-level security for tenant isolation, JSONB for flexible activity logs |
-| Real-time | Phoenix Channels (WebSockets) | Built into Phoenix, scales well, no third-party dependency |
+| Real-time | Socket.IO + Redis adapter | Mature WebSocket library, horizontal scaling via Redis, no third-party data processor |
 | Media storage | Tigris (S3-compatible, EU) | S3-compatible API, EU data residency, no egress fees |
-| Auth | JWT + refresh tokens | Stateless, works offline, mobile-friendly |
+| Auth | JWT + refresh tokens (jose) | Stateless, works offline, mobile-friendly, no third-party identity dependency |
 | Hosting | Fly.io (Frankfurt) | EU residency, simple deployment, Postgres managed option |
 
 ### 1.4 What We Are NOT Building in V1
@@ -105,41 +105,43 @@ The monolith is NOT a compromise. It is the deliberate architecture for this sca
 
 ## 2. Tech Stack Recommendation
 
-### 2.1 Backend: Elixir + Phoenix Framework
+### 2.1 Backend: Node.js 22 LTS + Fastify + TypeScript
 
-**Use Elixir with Phoenix 1.7+ and LiveView (for admin).**
+**Use Node.js 22 LTS with Fastify and TypeScript throughout.**
 
-Elixir runs on the BEAM VM, the same runtime as Erlang, which was designed for telecoms reliability (nine nines uptime). For a school communication app where parents rely on receiving attendance alerts and where WebSocket connections must stay open for real-time messaging, BEAM is the right runtime.
+Node.js is the right choice for this product at this stage: the engineer is fluent in JavaScript, the ecosystem for multi-tenant SaaS is mature, and Node.js handles the real-time and concurrency requirements comfortably at V1–V3 scale (500 schools, 60,000 children).
 
 Specific reasons:
 
-- Phoenix Channels (WebSockets) are first-class. You do not need a separate WebSocket server or a service like Pusher. One Phoenix node handles hundreds of thousands of concurrent WebSocket connections.
-- Elixir processes are isolated. A crash in the messaging module does not crash the media upload module. OTP supervisors restart crashed processes automatically.
-- Oban (background job library for Elixir) uses PostgreSQL as its queue — no Redis dependency for job processing, and jobs survive restarts with ACID guarantees.
-- The ecosystem has excellent GDPR tooling: Cloak for field-level encryption, Ecto for safe database access with compile-time query checking.
+- **Fastify** over Express: better performance, built-in JSON Schema validation, clean plugin architecture for multi-tenant middleware. Schema validation catches malformed API inputs before they reach business logic.
+- **TypeScript** throughout: catches tenant-isolation bugs (wrong `school_id`, missing auth checks) at compile time rather than in production. Prisma's generated types give end-to-end type safety from DB schema to API response.
+- **Socket.IO** with Redis adapter: handles WebSocket connections for real-time messaging. At 500 schools with ~100 concurrent parents each, that's 50,000 connections — well within Node.js capacity. The Redis adapter enables horizontal scaling across multiple Fly.io instances transparently.
+- **BullMQ** for background jobs: push notifications, photo processing, retention deletion, audit flushes. Backed by Redis, with retry logic, dead-letter queues, and a dashboard. No separate job runner process needed — workers run as part of the same deployment.
+- **Prisma** as ORM: excellent TypeScript integration, clean migration tooling, and the ability to drop to raw SQL for RLS-sensitive queries where needed.
 
-The trade-off: Elixir has a smaller hiring pool than Node.js or Python. At 1-2 engineers this does not matter — you are the team. By the time you hire, you will have proven product-market fit and can afford to be selective.
-
-**Internal module structure (enforced by Elixir's `use Boundary` or simply by convention):**
+**Internal module structure (enforced by TypeScript path aliases and index.ts barrel exports):**
 
 ```
-lib/
-  preschool_app/
+src/
+  modules/
     accounts/          # Auth, users, roles
     schools/           # Tenant management, school settings
     children/          # Child profiles, parent-child links
     messaging/         # Direct messages, broadcasts
-    daily_reports/     # Activity logs, meal/nap/mood
+    daily-reports/     # Activity logs, meal/nap/mood
     attendance/        # Attendance records, alerts
     media/             # Photo/video upload, consent enforcement
     consent/           # GDPR consent records
     notifications/     # Push, email, SMS dispatch
     audit/             # Audit event logging
     gdpr/              # Retention policies, erasure requests
-  preschool_app_web/   # Phoenix controllers, channels, views
+  middleware/          # Auth, RLS session, rate limiting
+  jobs/                # BullMQ worker definitions
+  lib/                 # Shared utilities (db client, storage, etc.)
+  app.ts               # Fastify app bootstrap
 ```
 
-Each top-level module owns its schemas, contexts, and business logic. Cross-module calls go through public context functions only — never direct schema access across modules.
+Each module exports a public API via `index.ts`. Cross-module calls go through those exports only — never importing internal files from another module directly. This is the modular monolith boundary enforced by convention and TypeScript imports.
 
 ### 2.2 Database: PostgreSQL 16
 
@@ -151,14 +153,15 @@ PostgreSQL is the correct choice because:
 - **JSONB** columns handle the variable structure of daily activity logs (each school may configure different fields in the future) without sacrificing queryability.
 - **Full-text search** in Spanish is built-in with proper dictionary support — you can search message history without Elasticsearch.
 - **Audit triggers** can capture all mutations to sensitive tables directly in Postgres before they reach the application layer.
-- **Ecto** (Elixir's database library) has first-class PostgreSQL support including RLS, LISTEN/NOTIFY, and array types.
+- **Prisma** has first-class PostgreSQL support. For RLS-sensitive queries, use `prisma.$executeRaw` to set the session variable before queries.
 
-Redis (via Fly.io Redis or Upstash EU) for:
+Redis (via Upstash EU Frankfurt) for:
 - Session data and rate limiting counters
-- Phoenix PubSub adapter for multi-node deployments
+- Socket.IO adapter for multi-node deployments
+- BullMQ job queues
 - Temporary offline sync queue state
 
-Do NOT use Redis for anything that must survive a restart. Use PostgreSQL (via Oban) for durable queues.
+Do NOT use Redis for anything that must survive a restart. BullMQ jobs use Redis but are designed for at-least-once delivery with retry — for truly durable, ACID-guaranteed operations use PostgreSQL transactions.
 
 ### 2.3 Mobile: React Native + Expo (Managed Workflow)
 
@@ -191,16 +194,17 @@ Next.js reasons:
 - Next.js API routes can serve as a lightweight BFF (Backend for Frontend) layer if needed — though most API calls go directly to the Phoenix backend.
 - Vercel EU region deployment is available and easy to set up, but since we're already on Fly.io, we can deploy Next.js as a Fly.io app in Frankfurt.
 
-### 2.5 Real-Time / Messaging: Phoenix Channels
+### 2.5 Real-Time / Messaging: Socket.IO
 
-**Use Phoenix Channels (WebSockets) built into the Phoenix framework. Do not use a third-party service like Pusher or Ably.**
+**Use Socket.IO with the Redis adapter. Do not use a third-party service like Pusher or Ably.**
 
-Phoenix Channels are production-proven, handle millions of concurrent connections, and are free. The alternative (Pusher/Ably) costs money at scale and creates a GDPR dependency on a third-party processor for message content.
+Socket.IO is production-proven, handles the concurrency requirements of this product comfortably, and keeps message content within your own infrastructure (no third-party GDPR dependency). The Redis adapter enables transparent horizontal scaling across multiple Fly.io nodes.
 
 Message delivery architecture:
-- Each teacher and parent connects to a Phoenix Channel on app open, subscribing to their relevant topics (school-specific, class-specific, child-specific).
-- Messages are persisted to PostgreSQL first, then broadcast via Phoenix PubSub.
-- Push notifications (FCM/APNs) are sent for users who are not currently connected — handled by an Oban background job triggered after message persistence.
+- Each teacher and parent connects via Socket.IO on app open, joining their relevant rooms (e.g. `school:{schoolId}`, `classroom:{classroomId}`).
+- Room membership is enforced server-side on connection using the verified JWT — a parent cannot join a room they have no relationship to.
+- Messages are persisted to PostgreSQL first, then broadcast via `io.to(room).emit(...)`.
+- Push notifications (FCM/APNs) are sent for users who are not currently connected — handled by a BullMQ job triggered after message persistence.
 - If WebSocket connection drops, the client reconnects and fetches missed messages via REST API using a `since` timestamp parameter.
 
 ### 2.6 Push Notifications: Firebase Cloud Messaging (FCM) + APNs via FCM
@@ -235,9 +239,9 @@ Access control model:
 
 For video: store the original upload. Use a background Oban job to transcode to H.264/AAC MP4 using `ffmpeg` running on the server for V1. At Year 3 scale, evaluate moving to a managed transcoding service. Do NOT use Mux in V1 — it is US-based and overkill for 60-second videos at this scale.
 
-### 2.8 Auth: JWT + Refresh Tokens (via Guardian)
+### 2.8 Auth: JWT + Refresh Tokens (via jose)
 
-**Use Guardian (Elixir JWT library) with short-lived access tokens and long-lived refresh tokens stored in HttpOnly cookies for web, and in secure device storage for mobile.**
+**Use the `jose` library (lightweight, standards-compliant) with short-lived access tokens and long-lived refresh tokens stored in HttpOnly cookies for web, and in secure device storage for mobile.**
 
 Token strategy:
 - Access token: 15-minute expiry, signed JWT, contains `user_id`, `school_id`, `role`
@@ -248,19 +252,20 @@ Three user roles are encoded in the JWT:
 - `teacher` — access to assigned classrooms
 - `parent` — access only to their own children's data
 
-Role-based access is enforced at the Phoenix controller level using `plug` pipelines, not in the frontend.
+Role-based access is enforced at the Fastify route level using preHandler hooks, not in the frontend.
 
-Do NOT use a third-party auth service (Auth0, Clerk) for V1 for two reasons: (1) they add a GDPR third-party dependency for user identity data, and (2) Guardian is mature, well-understood, and gives you full control over token revocation and session management.
+Do NOT use a third-party auth service (Auth0, Clerk) for V1 for two reasons: (1) they add a GDPR third-party dependency for user identity data, and (2) `jose` + Fastify gives you full control over token revocation and session management with minimal complexity.
 
 ### 2.9 Hosting / Infrastructure: Fly.io (Frankfurt Region)
 
 **Deploy everything on Fly.io in the `fra` (Frankfurt) region for EU data residency.**
 
 Fly.io advantages for this use case:
-- Native Elixir/BEAM support with built-in clustering — Elixir nodes can form a cluster automatically via Fly.io's internal DNS, enabling Phoenix PubSub across multiple nodes without configuration.
+- Excellent Node.js support — Docker-based deployment, `fly deploy` from CI, no Kubernetes needed.
 - Managed PostgreSQL (Fly Postgres) in Frankfurt — or use Supabase EU (Frankfurt) for a more managed experience with built-in connection pooling (PgBouncer).
 - Simple deployment model — `fly deploy` from CI. No Kubernetes, no ECS task definitions.
 - Private networking between services (no public internet between app and database).
+- Socket.IO horizontal scaling via the Redis adapter — multiple Fly.io nodes share WebSocket state transparently through Redis.
 - Reasonable cost at this scale — a 2-node app cluster + managed Postgres + Redis starts under €100/month.
 
 Use **Supabase (EU Frankfurt region)** for PostgreSQL over Fly Postgres for these reasons:
@@ -278,7 +283,7 @@ Supabase's EU Frankfurt region stores all data in Frankfurt. Their DPA (Data Pro
 **Use GitHub Actions for CI/CD.**
 
 Pipeline stages:
-1. `test` — run Elixir ExUnit tests + mix credo (linting) + mix dialyzer (type checking)
+1. `test` — run Jest tests + ESLint + TypeScript type check (`tsc --noEmit`)
 2. `build` — Docker image build + push to Fly.io registry
 3. `deploy` — `fly deploy` to production (on merge to `main`, after tests pass)
 4. `mobile` — Expo EAS Build triggered on tagged releases
@@ -624,7 +629,7 @@ Consent is a first-class domain entity, not a checkbox in a settings table.
 
 **Consent enforcement layers (defense in depth):**
 
-Layer 1 — Application logic: Before creating a `media_child_tags` record, the `Media.Consent` module checks for a valid `consent_records` row.
+Layer 1 — Application logic: Before creating a `media_child_tags` record, the `consent` module checks for a valid `consent_records` row.
 
 Layer 2 — Database constraint: A PostgreSQL trigger on `media_child_tags` validates consent before insert.
 
@@ -658,7 +663,7 @@ The Tigris bucket has zero public access. Every photo URL is a time-limited sign
 
 Each school configures a `data_retention_days` value (default 365 days, minimum 90 days to comply with reasonable operational needs, maximum configurable per contract).
 
-Implementation via Oban scheduled job (runs nightly at 02:00 EU time):
+Implementation via BullMQ scheduled job (runs nightly at 02:00 EU time):
 
 ```
 RetentionJob:
@@ -698,7 +703,7 @@ A parent can request deletion of their personal data and their child's data. Thi
 - Anonymized attendance statistics (no PII, used for school billing)
 - Invoice and payment records (7 years, Spanish tax law)
 
-Implementation: Erasure requests create an `ErasureRequest` record with status `pending`. An Oban job processes them asynchronously within 30 days (GDPR requirement) and sends a completion notification. All erasure completions are logged in the audit trail.
+Implementation: Erasure requests create an `ErasureRequest` record with status `pending`. A BullMQ job processes them asynchronously within 30 days (GDPR requirement) and sends a completion notification. All erasure completions are logged in the audit trail.
 
 ### 4.6 Encryption
 
@@ -707,7 +712,7 @@ Implementation: Erasure requests create an `ErasureRequest` record with status `
 **At rest:**
 - Database: Supabase (PostgreSQL) encrypts the storage volume at rest (AES-256). This is infrastructure-level encryption.
 - Media: Tigris encrypts all objects at rest (AES-256).
-- Field-level encryption: Use Cloak (Elixir library) to encrypt sensitive fields before they reach the database. Fields requiring field-level encryption:
+- Field-level encryption: Encrypt sensitive fields in the application layer before they reach the database (use `@noble/ciphers` or Node.js native `crypto` AES-256-GCM). Fields requiring field-level encryption:
   - `children.medical_notes`
   - `children.dietary_notes`
   - `users.phone_number`
@@ -715,7 +720,7 @@ Implementation: Erasure requests create an `ErasureRequest` record with status `
 
 Field-level encryption means even a database dump does not expose these values without the application's encryption key.
 
-**Encryption key management:** Store encryption keys in environment variables (Fly.io secrets), not in the database. Rotate keys annually using Cloak's key rotation support.
+**Encryption key management:** Store encryption keys in environment variables (Fly.io secrets), not in the database. Rotate keys annually — implement a key version field alongside encrypted values to support gradual re-encryption during rotation.
 
 ### 4.7 DPO Support
 
@@ -832,15 +837,15 @@ The alternatives and why they are wrong for this scale:
 **RLS Implementation:**
 
 ```sql
--- Set at the start of every DB connection from Phoenix
-SET LOCAL app.school_id = '<uuid>';
+-- Set at the start of every DB transaction from Node.js
+SELECT set_config('app.school_id', '<uuid>', true);
 
 -- Policy on every tenant-scoped table:
 CREATE POLICY tenant_isolation ON children
   USING (school_id = current_setting('app.school_id')::UUID);
 ```
 
-The Phoenix application sets `app.school_id` from the authenticated JWT before any database query. The RLS policy ensures no query can return rows from a different school.
+The Fastify middleware sets `app.school_id` from the authenticated JWT before any database query using a Prisma middleware hook. The RLS policy ensures no query can return rows from a different school.
 
 **Superuser bypass:** A separate `admin` connection role (used only for migrations and internal tooling) bypasses RLS. This role is never used by the application runtime — only by maintenance scripts.
 
@@ -866,10 +871,10 @@ SchoolOnboarding transaction:
   5. Create default RetentionPolicy (365 days)
   6. Create default school Settings
   7. Log audit event: school.created
-  8. Create Stripe Customer (async, non-blocking)
+  8. Create Stripe Customer (async BullMQ job, non-blocking)
 ```
 
-This is a single Elixir Ecto.Multi transaction — all steps succeed or all roll back. School setup is complete in under 1 second.
+Steps 1–7 run inside a single Prisma `$transaction` — all succeed or all roll back. School setup is complete in under 1 second.
 
 After onboarding, the director uses the web app to:
 - Create classrooms
@@ -945,8 +950,8 @@ Do NOT generate signed URLs client-side. The Tigris secret key must never leave 
 ### 7.4 API Security
 
 - **Rate limiting:** 100 requests/minute per authenticated user, 10 requests/minute for unauthenticated login attempts. Enforced via Redis counter with sliding window.
-- **Input validation:** All inputs validated with Ecto changesets before reaching business logic. Binary content type validation for media uploads.
-- **SQL injection:** Impossible via Ecto parameterized queries. Never use string interpolation in database queries.
+- **Input validation:** All inputs validated with Zod schemas at the Fastify route level before reaching business logic. Binary content type validation for media uploads.
+- **SQL injection:** Impossible via Prisma parameterized queries. Never use string interpolation in raw SQL (`$executeRaw` uses tagged template literals that are parameterized automatically).
 - **CORS:** Strict origin allowlist — only the known web frontend origin is permitted.
 - **Content Security Policy:** Strict CSP headers on the web app. Media served from Tigris, not from the same origin.
 - **Helmet headers:** X-Frame-Options: DENY, X-Content-Type-Options: nosniff, Referrer-Policy: no-referrer.
@@ -969,7 +974,7 @@ Beyond standard auth/authz:
 
 **Works fine through Year 3 without changes:**
 - Single PostgreSQL instance (Supabase scales to the required size easily)
-- Single Elixir application (Elixir handles millions of concurrent WebSocket connections on one node)
+- Single Node.js application (Node.js handles 50,000+ concurrent WebSocket connections on one node at this load profile)
 - Tigris media storage (object storage is inherently scalable)
 - Current data model and RLS approach
 
@@ -981,7 +986,7 @@ Beyond standard auth/authz:
 
 3. **Media storage costs:** 500 schools × ~20 photos/day × 365 days × 3MB/photo = ~11TB/year. Tigris costs approximately €0.015/GB/month — about €165/month at this volume. Not a concern.
 
-4. **Push notification throughput:** At 500 schools, a simultaneous daily report publish by all teachers at ~09:00 generates ~30,000 push notifications in a few minutes. Oban with 10-20 workers handles this. If needed, add a dedicated Oban queue for notifications with higher concurrency.
+4. **Push notification throughput:** At 500 schools, a simultaneous daily report publish by all teachers at ~09:00 generates ~30,000 push notifications in a few minutes. BullMQ with 10-20 concurrent workers handles this. If needed, add a dedicated BullMQ queue for notifications with higher concurrency.
 
 ### 8.2 What to Defer to Phase 2
 
@@ -1023,16 +1028,16 @@ The order matters. Build in this sequence to unblock everything else:
 
 **Week 1–2: Foundation**
 - Fly.io + Supabase setup, CI/CD pipeline (GitHub Actions → fly deploy)
-- Elixir Phoenix project scaffold with module structure
-- PostgreSQL schema: School, User, Staff, Child, Classroom, ParentChildLink
-- JWT authentication (Guardian): login, refresh, logout
-- Row-Level Security setup and test
+- Node.js + Fastify + TypeScript project scaffold with module structure
+- PostgreSQL schema + Prisma setup: School, User, Staff, Child, Classroom, ParentChildLink
+- JWT authentication (jose): login, refresh, logout
+- Row-Level Security setup and test (Prisma middleware for `set_config`)
 - Expo React Native project scaffold + WatermelonDB local schema
 
 **Week 3–4: Multi-tenancy + Auth**
 - School onboarding flow (API + web UI)
 - Invitation flow (director invites teacher, director invites parent)
-- Role-based access enforcement (director/teacher/parent plugs)
+- Role-based access enforcement (director/teacher/parent Fastify preHandlers)
 - User profile management
 - Basic Next.js web app with auth
 
@@ -1040,7 +1045,7 @@ The order matters. Build in this sequence to unblock everything else:
 - Attendance data model + API
 - Attendance marking UI (React Native — fast mobile-first)
 - Offline attendance marking (WatermelonDB + sync)
-- Safeguarding alert job (Oban scheduled job at configurable time)
+- Safeguarding alert job (BullMQ scheduled job at configurable time)
 - Push notifications for attendance (FCM setup)
 
 **Week 7–9: Daily Reports**
@@ -1058,12 +1063,12 @@ The order matters. Build in this sequence to unblock everything else:
 - Photo tagging UI (teacher tags children, consent-aware)
 - Parent photo view with signed URL access
 - Video upload (same flow as photo, with duration limit enforcement)
-- Background video transcoding job (ffmpeg via Oban)
+- Background video transcoding job (ffmpeg via BullMQ)
 - GDPR: local photo deletion after sync
 
 **Week 13–14: Messaging**
 - Message data model + API
-- Phoenix Channels setup for real-time delivery
+- Socket.IO setup for real-time delivery (Redis adapter for multi-node)
 - Direct messaging UI (teacher ↔ parent)
 - Class broadcast UI (teacher → class, one-way)
 - School broadcast UI (director → school)
@@ -1109,11 +1114,11 @@ This is a realistic timeline for a single senior engineer building a production-
 | Email delivery | Buy (Brevo) | Deliverability is a full-time job |
 | SMS alerts | Buy (Vonage) | Carrier relationships required |
 | Payment processing | Buy (Stripe) | PCI DSS compliance is non-trivial |
-| Authentication | Build (Guardian) | GDPR: no third-party identity dependency |
-| Real-time messaging | Build (Phoenix Channels) | No third-party data processor for messages |
+| Authentication | Build (jose) | GDPR: no third-party identity dependency |
+| Real-time messaging | Build (Socket.IO) | No third-party data processor for messages |
 | Media storage | Buy (Tigris) | Object storage is a commodity |
 | Error monitoring | Buy (Sentry) | Essential, no-brainer |
-| Video transcoding | Build V1 (ffmpeg + Oban) | Low volume, no managed EU option that's simple |
+| Video transcoding | Build V1 (ffmpeg + BullMQ) | Low volume, no managed EU option that's simple |
 | Analytics | Buy (Plausible) | Privacy-first, EU-hosted, no-code setup |
 | Search | Build (PostgreSQL FTS) | Not needed until V2 |
 
@@ -1149,7 +1154,7 @@ Cost: ~€0.05/SMS in Spain. Low volume (emergency use only), negligible cost.
 
 ### Video Transcoding: Self-hosted ffmpeg (V1), Mux Europe (V2)
 
-V1: Run ffmpeg on the Fly.io application server via an Oban background job. For 60-second videos at this scale, this is fine. A Fly.io machine with 2 shared vCPUs transcodes a 60-second 1080p video in under 30 seconds.
+V1: Run ffmpeg on the Fly.io application server via a BullMQ background job. For 60-second videos at this scale, this is fine. A Fly.io machine with 2 shared vCPUs transcodes a 60-second 1080p video in under 30 seconds.
 
 V2 (if video volume warrants): Evaluate Mux, which has EU data residency options. At V1 scale, do not add the complexity and cost of a managed transcoding service.
 
