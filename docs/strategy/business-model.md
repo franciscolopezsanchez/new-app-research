@@ -118,6 +118,29 @@ She is spending operational money, often her own school's money, and she is acco
 3. **Invoice / factura always available.** She needs a proper factura for her accountant. Stripe must generate a valid Spanish factura automatically with your NIF, her NIF, and the correct IVA line (21% IVA for software SaaS). Failing here breaks trust immediately.
 4. **Price stability.** Don't change pricing on existing customers in Year 1. If you raise prices in Year 2, grandfather existing schools for 12 months.
 
+### 2.6 Kit Digital — Government Subsidy Sales Channel (Year 2)
+
+**What it is:** Spain's national digital transformation subsidy program (EU NextGenerationEU funds). Private guarderías can use their "bono" to pay for SaaS tools through accredited providers called Agentes Digitalizadores.
+
+**Why it matters:** KinderClose already uses Kit Digital as their primary sales hook — they lead with "use your government bono to pay for this" and price at €1,500+VAT/year. Schools know about it. It eliminates the budget objection entirely for the first year.
+
+**Current status (April 2026):** The program closed October 2025. A new convocation is expected before August 2026 (EU deadline pressure), but no formal announcement yet. Do not rely on it for the first cohort.
+
+**Eligibility:** Private guarderías with a Spanish tax registration qualify. Most land in Segment II (3–9 staff = €6,000 bono) or Segment I (10–49 staff = €12,000). Municipal/public escuelas infantiles are excluded. Best solution category: **Gestión de Procesos** (same category KinderClose uses).
+
+**The blocker — Agente Digitalizador accreditation:**
+Schools can only spend their bono with Red.es-accredited providers. Requirements include €50,000 prior-year revenue from comparable Spanish projects. A pre-revenue startup cannot qualify. Realistic timeline: apply in Q3/Q4 2027 after ~18 months of paying customers.
+
+**Bridge option (Year 1):** Partner with an existing accredited Agente Digitalizador who resells your app under their accreditation. Economics are less favorable (partner takes margin), but it allows early schools to access their bono before you are directly accredited. Worth exploring if inbound demand from bono-aware schools is high.
+
+**Pricing integrity when accredited:** Do not discount recurring price for Kit Digital customers. Keep €59/month and frame the bono as covering the first year at zero upfront cost to the school — then standard price continues. This preserves the revenue model while removing the friction.
+
+**Process timeline (when working):** ~4–8 weeks from school decision to active account (bono approval + contract + onboarding). Longer than direct signup, but conversion is near-irreversible once the bono is committed, which reduces early churn.
+
+**Float risk:** Red.es pays Agentes Digitalizadores 60–90+ days after justification. At first-cohort scale, manageable. At 50+ schools via this channel, it becomes a working capital consideration.
+
+**Immediate action:** Track Kit Digital bono status per school in the CSV and call log. Add to Mom Test script (see validation-plan.md Pregunta 10). If a school mentions they want to use their bono, note it as warm pipeline for when accreditation is achieved.
+
 ---
 
 ## 3. Sales Motion
