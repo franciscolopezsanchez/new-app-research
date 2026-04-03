@@ -74,16 +74,18 @@ See `user-personas.md` for persona context (Carmen = director, Laura = teacher, 
 
 | # | Story | Acceptance Criteria |
 |---|---|---|
-| 3.1 | As Laura, I want to upload photos from my phone to a child's daily report. | Upload from camera roll or in-app camera. Up to 10 photos per report. Under 5 seconds per photo on 4G. |
+| 3.1 | As Laura, I want to upload photos from my phone to a child's daily report. | Upload from camera roll or in-app camera. No limit on number of photos per report. Under 5 seconds per photo on 4G (client-side compression applied before upload). |
 | 3.2 | As Laura, I want to tag which children appear in each photo so photos are only visible to tagged families. | Mandatory tagging flow before publish. Photo not visible to untagged families. This is the GDPR-compliant replacement for group WhatsApp sharing. |
-| 3.3 | As Laura, I want to upload a short video (up to 60 seconds). | Video upload supported. Max 100MB. Auto-compression applied. |
-| 3.4 | As Sofia, I want to view and save photos of my child to my camera roll. | Download button on each photo. Original quality retained. Watermarking optional (director preference). |
+| 3.3 | As Laura, I want to upload videos from my phone. | Video upload supported, no duration limit. Max 500MB per file. Client-side compression applied before upload. Auto-generated thumbnail shown in feed. |
+| 3.4 | As Sofia, I want to view and save photos and videos of my child to my camera roll. | Download button on each photo and video. Original quality retained. Watermarking optional (director preference). |
 | 3.5 | As Sofia, I want a push notification when a new photo of my child is posted. | Notification within 30 seconds of publish. Thumbnail shown if OS permissions allow. |
 | 3.6 | As Carmen, I want to confirm parents have given photo consent before their child's images are shared. | Consent status tracked per child per family. Teacher cannot tag a child if consent is not recorded. Consent collected digitally during parent onboarding. |
 
-**Complexity**: High. Photo tagging with per-child visibility rules is non-trivial. Video adds infrastructure cost (storage, CDN). GDPR consent model needs legal review — do not ship photo sharing without it.
+**Complexity**: High. Photo tagging with per-child visibility rules is non-trivial. GDPR consent model needs legal review — do not ship photo sharing without it.
 
-**Note**: Consider starting with photos only in V1, adding video in V1.1 to reduce scope risk.
+**Storage and cost note**: No per-report media limits. Storage cost is negligible at target scale (~2 GB/school/month on Cloudflare R2, no egress fees). Limits are UX-driven only (500 MB/file) to prevent unacceptably long uploads on mobile. Media never passes through the app server — teachers upload directly to R2 via pre-signed URLs. Thumbnails served via R2 image transformations. See `architecture.md` for implementation detail.
+
+**Note on external messaging**: Do NOT relay photos or videos to external channels (WhatsApp, Telegram, email). Media stays in-platform; external notifications send text + deep link only. Sending child images to third-party servers undermines the GDPR compliance that is our core sales argument.
 
 ---
 
