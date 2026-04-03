@@ -270,6 +270,12 @@ If yes:
 
 This reveals whether they have a software budget and a habit of paying for tools. It is NOT a willingness-to-pay question for your product — it is a behavioral question about existing habits.
 
+Follow up, regardless of their answer:
+
+> "¿Habéis solicitado el bono del Kit Digital, o lo habéis usado para alguna herramienta?"
+
+Do not explain what Kit Digital is unless they ask — if they don't know it, that is data. Listen for: whether they've already spent their bono (on a competitor?), whether it's available but unused (budget waiting to be directed), or whether they've never heard of it (less digitally aware center). If they've used it for a competitor app, ask which one.
+
 ---
 
 **Pregunta 11 — Solución ideal (open, no leading)**
@@ -421,6 +427,8 @@ Fill in within 30 minutes of the call, while memory is fresh. Use a spreadsheet,
 | Teacher Pain Mentioned? | Yes (direct) / Yes (indirect) / No |
 | Searched for Alternatives? | Yes (describe) / No |
 | Software Budget Exists? | Yes / No / Unknown |
+| Kit Digital Awareness | Used it / Has bono unused / Never heard of it / Unknown |
+| Kit Digital — Used for competitor? | Yes (which app) / No |
 | Agreed to Follow-Up Demo? | Yes / No |
 | Referrals Given? | Names/contacts if any |
 | Top Quote | One verbatim quote that captures the call |
