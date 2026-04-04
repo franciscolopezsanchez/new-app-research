@@ -46,7 +46,9 @@ See `user-personas.md` for persona context (Carmen = director, Laura = teacher, 
 
 **Priority**: Must Have
 
-**Problem it solves**: Teachers produce no structured daily record, or produce one on paper. Parents have no visibility into their child's day between drop-off and pickup.
+**Problem it solves**: Teachers currently message 15 parents individually on personal WhatsApp to share daily updates. This takes significant time, creates GDPR exposure, and produces no structured record. Parents have no visibility into their child's day between drop-off and pickup.
+
+**Core value for Laura**: Write the report once — the app distributes it automatically to every parent in the class, through whatever channel each parent prefers.
 
 **User Stories**:
 
@@ -56,11 +58,15 @@ See `user-personas.md` for persona context (Carmen = director, Laura = teacher, 
 | 2.2 | As Laura, I want to add child-specific notes to a daily report when relevant. | Optional per-child note field. Blank by default, visible only to that child's family if filled in. |
 | 2.3 | As Laura, I want to log meal information (ate well / ate some / did not eat) for each child. | Quick-select meal status per child (3 options maximum — no free text required). |
 | 2.4 | As Laura, I want to log nap/rest information for each child. | Nap start/end time or simple status (slept well / restless / did not sleep) per child. |
-| 2.5 | As Sofia, I want to receive a push notification once the daily report is published. | Notification sent when teacher marks report published. Includes child's name and class activity preview. |
+| 2.5 | As Sofia, I want to receive the daily report through the channel I prefer, without having to open a new app if I choose not to. | Parent sets preferred channel during onboarding: push notification (default), or email. Report delivered automatically on publish. Text summary always included; photos/videos accessible via deep link into the app only. |
 | 2.6 | As Sofia, I want to view a history of daily reports for the past 90 days. | Report archive accessible in parent app, filterable by date. Minimum 90 days of history. |
 | 2.7 | As Carmen, I want to see which teachers have submitted daily reports and which have not. | Director dashboard shows report status per class: submitted / not yet submitted. Visible by default at 3pm. |
 
 **Complexity**: Medium-High. Class-level report with individual child overrides is the core data model challenge. Must be fast — if it takes more than 3 minutes, Laura will stop doing it. Use template-driven input (activity tags, mood indicators, meal pickers) rather than free-text-only.
+
+**Distribution architecture**: On report publish, a background job (BullMQ) fans out to every linked parent. Per parent: push notification if app installed and notifications enabled; email via Brevo as fallback or if preferred. Both channels send text summary + deep link — photos and videos are never included in the external delivery, only accessible inside the app.
+
+**External channel scope for V1**: Push + email only. WhatsApp Business API deferred to V1.1 — per-conversation cost (~€0.06) reaches ~€90/school/month at a 5-class school, which must be priced into a higher subscription tier before shipping.
 
 ---
 
