@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Feedback Entry Form</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f5; color: #1a1a1a; padding: 24px; }
+  h1 { font-size: 1.2rem; font-weight: 600; margin-bottom: 24px; color: #111; }
+  .section { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 20px; margin-bottom: 16px; }
+  .section h2 { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #888; margin-bottom: 14px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+  .row.full { grid-template-columns: 1fr; }
+  label { display: block; font-size: 0.8rem; font-weight: 500; color: #555; margin-bottom: 4px; }
+  input, select, textarea { width: 100%; font-size: 0.875rem; font-family: inherit; border: 1px solid #d0d0d0; border-radius: 6px; padding: 8px 10px; background: #fafafa; color: #111; outline: none; transition: border-color 0.15s; }
+  input:focus, select:focus, textarea:focus { border-color: #555; background: #fff; }
+  textarea { resize: vertical; min-height: 80px; }
+  .hint { font-size: 0.72rem; color: #aaa; margin-top: 3px; }
+  .rating { display: flex; gap: 8px; }
+  .rating input { display: none; }
+  .rating label { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid #d0d0d0; border-radius: 6px; cursor: pointer; font-size: 0.875rem; font-weight: 500; background: #fafafa; color: #555; margin-bottom: 0; transition: all 0.15s; }
+  .rating input:checked + label { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+  .rating label:hover { border-color: #888; }
+  .actions { display: flex; gap: 10px; margin-top: 8px; }
+  button { padding: 10px 20px; border-radius: 6px; border: none; font-size: 0.875rem; font-weight: 500; cursor: pointer; transition: background 0.15s; }
+  .btn-primary { background: #1a1a1a; color: #fff; }
+  .btn-primary:hover { background: #333; }
+  .btn-secondary { background: #e8e8e8; color: #333; }
+  .btn-secondary:hover { background: #d8d8d8; }
+  #output-section { display: none; }
+  #output { width: 100%; font-family: "SF Mono", "Fira Code", monospace; font-size: 0.78rem; min-height: 300px; background: #1a1a1a; color: #e8e8e8; border: none; border-radius: 8px; padding: 16px; }
+  .copy-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .copy-row span { font-size: 0.78rem; color: #888; }
+  #copy-btn { padding: 6px 14px; font-size: 0.78rem; }
+  #filename { font-size: 0.78rem; color: #888; font-family: monospace; margin-top: 8px; }
+  .tag { display: inline-block; font-size: 0.68rem; background: #f0f0f0; color: #888; border-radius: 4px; padding: 1px 6px; margin-left: 4px; }
+</style>
+</head>
+<body>
+
+<h1>User Feedback Entry</h1>
+
+<form id="form">
+
+  <!-- PROFILE -->
+  <div class="section">
+    <h2>Profile</h2>
+    <div class="row">
+      <div>
+        <label>Name / Initials</label>
+        <input type="text" id="name" placeholder="e.g. Laura">
+      </div>
+      <div>
+        <label>Date</label>
+        <input type="date" id="date">
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Role</label>
+        <select id="role">
+          <option value="">— select —</option>
+          <option>Parent</option>
+          <option>Grandparent</option>
+          <option>Teacher</option>
+          <option>School director</option>
+          <option>Other caregiver</option>
+        </select>
+      </div>
+      <div>
+        <label>School / Workplace</label>
+        <input type="text" id="school" placeholder="e.g. CEI Pulgarcito">
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Child's age range <span class="tag">if parent</span></label>
+        <select id="age">
+          <option value="">— N/A or select —</option>
+          <option>0–1</option>
+          <option>1–2</option>
+          <option>2–3</option>
+          <option>3–6</option>
+        </select>
+      </div>
+      <div>
+        <label>School type</label>
+        <select id="school-type">
+          <option value="">— select —</option>
+          <option>Private guardería</option>
+          <option>Concertada</option>
+          <option>Public</option>
+          <option>Unknown</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>City / Region</label>
+        <input type="text" id="city" placeholder="e.g. Morón de la Frontera, Sevilla">
+      </div>
+      <div>
+        <label>How collected</label>
+        <select id="collected">
+          <option value="">— select —</option>
+          <option>In-person conversation</option>
+          <option>WhatsApp</option>
+          <option>Call</option>
+          <option>Written response</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- APP USED -->
+  <div class="section">
+    <h2>App(s) Used</h2>
+    <div class="row">
+      <div>
+        <label>App name</label>
+        <input type="text" id="app-name" placeholder="e.g. KinderClose, ClassDojo">
+      </div>
+      <div>
+        <label>How long</label>
+        <input type="text" id="app-duration" placeholder="e.g. one full school year">
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>How often used</label>
+        <select id="app-frequency">
+          <option value="">— select —</option>
+          <option>Daily</option>
+          <option>A few times a week</option>
+          <option>Rarely</option>
+          <option>Installed but not used</option>
+        </select>
+      </div>
+      <div>
+        <label>Who set it up</label>
+        <select id="app-setup">
+          <option value="">— select —</option>
+          <option>School sent link</option>
+          <option>I downloaded myself</option>
+          <option>Unknown</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- USAGE -->
+  <div class="section">
+    <h2>Usage & Opinions</h2>
+    <div class="row full">
+      <div>
+        <label>What they used most</label>
+        <textarea id="used-most" placeholder="Features or sections they opened regularly..."></textarea>
+      </div>
+    </div>
+    <div class="row full">
+      <div>
+        <label>Pain points <span class="tag">#pain</span></label>
+        <textarea id="pain" placeholder="Frustrations, friction, things that annoyed them..."></textarea>
+      </div>
+    </div>
+    <div class="row full">
+      <div>
+        <label>What they liked <span class="tag">#delight</span></label>
+        <textarea id="delight" placeholder="Things that genuinely worked well..."></textarea>
+      </div>
+    </div>
+    <div class="row full">
+      <div>
+        <label>What was missing</label>
+        <textarea id="missing" placeholder="Things they wished the app had..."></textarea>
+      </div>
+    </div>
+    <div class="row full">
+      <div>
+        <label>Features they ignored <span class="tag">#ignored</span></label>
+        <textarea id="ignored" placeholder="Parts of the app they never touched..."></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- EXTRA -->
+  <div class="section">
+    <h2>Privacy, Competitors & Quotes</h2>
+    <div class="row full">
+      <div>
+        <label>Privacy / Data concerns <span class="tag">#privacy</span></label>
+        <textarea id="privacy" placeholder="Photos, consent, discomfort with data..."></textarea>
+      </div>
+    </div>
+    <div class="row full">
+      <div>
+        <label>Competitor apps mentioned <span class="tag">#competitor</span></label>
+        <textarea id="competitors" placeholder="Other apps they've used or heard of..."></textarea>
+      </div>
+    </div>
+    <div class="row full">
+      <div>
+        <label>Key quotes <span class="tag">#quote</span></label>
+        <textarea id="quotes" placeholder='Verbatim or near-verbatim. One per line.' style="min-height:100px;"></textarea>
+        <p class="hint">One quote per line — each will be formatted as a blockquote.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- SENTIMENT -->
+  <div class="section">
+    <h2>Overall Sentiment</h2>
+    <div style="margin-bottom:12px;">
+      <label style="margin-bottom:8px;">Rating</label>
+      <div class="rating">
+        <input type="radio" name="rating" id="r1" value="1"><label for="r1">1</label>
+        <input type="radio" name="rating" id="r2" value="2"><label for="r2">2</label>
+        <input type="radio" name="rating" id="r3" value="3"><label for="r3">3</label>
+        <input type="radio" name="rating" id="r4" value="4"><label for="r4">4</label>
+        <input type="radio" name="rating" id="r5" value="5"><label for="r5">5</label>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Would recommend</label>
+        <select id="recommend">
+          <option value="">— select —</option>
+          <option>Yes</option>
+          <option>No</option>
+          <option>Maybe</option>
+        </select>
+      </div>
+      <div>
+        <label>Closest persona</label>
+        <select id="persona">
+          <option value="">— select —</option>
+          <option>Sofia (anxious, engaged)</option>
+          <option>Alejandro (passive, trusting)</option>
+          <option>Laura (teacher)</option>
+          <option>Carmen (director)</option>
+          <option>Other</option>
+        </select>
+      </div>
+    </div>
+    <div class="row full">
+      <div>
+        <label>Summary in one sentence</label>
+        <input type="text" id="summary" placeholder="e.g. Happy enough to stay, but frustrated by media limits...">
+      </div>
+    </div>
+    <div class="row full">
+      <div>
+        <label>What this adds or corrects (persona relevance)</label>
+        <textarea id="persona-notes" placeholder="What does this entry add or correct about the closest persona?"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button type="button" class="btn-primary" onclick="generate()">Generate Markdown</button>
+    <button type="button" class="btn-secondary" onclick="resetForm()">Reset</button>
+  </div>
+</form>
+
+<!-- OUTPUT -->
+<div id="output-section" style="margin-top:20px;">
+  <div class="section">
+    <div class="copy-row">
+      <h2>Generated Markdown</h2>
+      <button id="copy-btn" class="btn-secondary" onclick="copyOutput()">Copy</button>
+    </div>
+    <textarea id="output" readonly></textarea>
+    <div id="filename"></div>
+  </div>
+</div>
+
+<script>
+  // Set today's date
+  const today = new Date();
+  const yy = String(today.getFullYear()).slice(2);
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const dd = String(today.getDate()).padStart(2, '0');
+  document.getElementById('date').value = `${today.getFullYear()}-${mm}-${dd}`;
+
+  function val(id) {
+    return (document.getElementById(id).value || '').trim();
+  }
+
+  function bulletize(text, fallback = 'N/A') {
+    if (!text) return `- ${fallback}`;
+    return text.split('\n').map(l => l.trim()).filter(Boolean).map(l => `- ${l}`).join('\n');
+  }
+
+  function quotify(text) {
+    if (!text) return '>';
+    return text.split('\n').map(l => l.trim()).filter(Boolean).map(l => `> "${l}"`).join('\n\n');
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr) return '';
+    const [y, m, d] = dateStr.split('-');
+    return `${y}-${m}-${d}`;
+  }
+
+  function generate() {
+    const name = val('name') || 'Unknown';
+    const date = val('date') ? formatDate(val('date')) : 'Unknown date';
+    const role = val('role') || 'Unknown';
+    const school = val('school');
+    const age = val('age') || 'N/A';
+    const schoolType = val('school-type') || 'Unknown';
+    const city = val('city') || 'Unknown';
+    const collected = val('collected') || 'Unknown';
+    const appName = val('app-name') || 'Unknown';
+    const appDuration = val('app-duration') || 'Unknown';
+    const appFreq = val('app-frequency') || 'Unknown';
+    const appSetup = val('app-setup') || 'Unknown';
+    const rating = document.querySelector('input[name="rating"]:checked')?.value || '—';
+    const recommend = val('recommend') || '—';
+    const persona = val('persona') || '—';
+    const summary = val('summary') || '—';
+
+    const roleDisplay = school ? `${role} at ${school}` : role;
+
+    const md = `# Feedback Entry — ${name} (${date})
+
+## Profile
+- **Role:** ${roleDisplay}
+- **Child's age range:** ${age}
+- **School type:** ${schoolType}
+- **City / region:** ${city}
+- **How collected:** ${collected}
+
+---
+
+## App(s) Used
+- **App name:** ${appName}
+- **How long:** ${appDuration}
+- **How often used:** ${appFreq}
+- **Who set it up:** ${appSetup}
+
+---
+
+## What They Used Most
+(Features or sections they opened regularly)
+
+${bulletize(val('used-most'))}
+
+---
+
+## Pain Points \`#pain\`
+(Frustrations, friction, things that annoyed them)
+
+${bulletize(val('pain'))}
+
+---
+
+## What They Liked \`#delight\`
+(Things that genuinely worked well or made them happy)
+
+${bulletize(val('delight'), 'Nothing specific mentioned')}
+
+---
+
+## What Was Missing
+(Things they wished the app had)
+
+${bulletize(val('missing'))}
+
+---
+
+## Features They Ignored \`#ignored\`
+(Parts of the app they never touched or found useless)
+
+${bulletize(val('ignored'), 'Unknown')}
+
+---
+
+## Privacy / Data Concerns \`#privacy\`
+(Any mention of photos, sharing, consent, or discomfort)
+
+${bulletize(val('privacy'), 'None mentioned')}
+
+---
+
+## Competitor Apps Mentioned \`#competitor\`
+(Any other apps they've used or heard of)
+
+${bulletize(val('competitors'), 'None mentioned')}
+
+---
+
+## Key Quotes \`#quote\`
+(Verbatim or near-verbatim — these are gold for personas and marketing)
+
+${quotify(val('quotes'))}
+
+---
+
+## Overall Sentiment
+- **Rating:** ${rating} / 5
+- **Would recommend to another parent:** ${recommend}
+- **Summary in one sentence:** ${summary}
+
+---
+
+## Persona Relevance
+Which persona does this person most resemble, and what does this entry add or correct?
+
+- **Closest persona:** ${persona}
+- **What this adds or corrects:** ${val('persona-notes') || '—'}
+`;
+
+    document.getElementById('output').value = md;
+    document.getElementById('output-section').style.display = 'block';
+
+    // Suggest filename
+    const dateObj = val('date') ? new Date(val('date') + 'T00:00:00') : new Date();
+    const fy = dateObj.getFullYear();
+    const fmo = dateObj.toLocaleString('en', { month: 'short' });
+    const fd = String(dateObj.getDate()).padStart(2, '0');
+    const safeName = name.replace(/[^a-zA-Z0-9À-ÿ ]/g, '').trim();
+    document.getElementById('filename').textContent = `Suggested filename: ${fy}-${fmo}-${fd} ${safeName}.md`;
+
+    document.getElementById('output-section').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function copyOutput() {
+    const out = document.getElementById('output');
+    out.select();
+    document.execCommand('copy');
+    const btn = document.getElementById('copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 1500);
+  }
+
+  function resetForm() {
+    document.getElementById('form').reset();
+    document.getElementById('date').value = `${today.getFullYear()}-${mm}-${dd}`;
+    document.getElementById('output-section').style.display = 'none';
+  }
+</script>
+</body>
+</html>
