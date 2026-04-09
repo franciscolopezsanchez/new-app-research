@@ -11,8 +11,9 @@ export default function Home() {
       </div>
 
       {/* School badge */}
-      <div className="mb-10 bg-white rounded-2xl px-6 py-3 shadow-sm border border-gray-100 text-sm text-gray-600 font-medium">
-        📍 Escuela Infantil Sol y Luna — Demo
+      <div className="mb-10 bg-white rounded-2xl px-6 py-3 shadow-sm border border-gray-100 text-sm text-gray-600 font-medium flex items-center gap-2">
+        📍 Escuela Infantil Sol y Luna
+        <span className="text-xs bg-amber-100 text-amber-700 rounded-full px-2 py-0.5 font-medium">Demo interactiva</span>
       </div>
 
       {/* Role selector */}
