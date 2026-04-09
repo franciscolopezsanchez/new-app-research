@@ -33,9 +33,16 @@ export default function Home() {
       </div>
 
       {/* Tagline */}
-      <p className="mt-14 text-xs text-gray-400 text-center max-w-sm">
-        Reemplaza los grupos de WhatsApp con una plataforma privada, segura y compatible con el RGPD.
-      </p>
+      <div className="mt-14 flex flex-col items-center gap-2">
+        <div className="flex gap-4 text-xs text-gray-400">
+          <span>🔒 RGPD</span>
+          <span>📱 iOS & Android</span>
+          <span>🇪🇸 Hecho para España</span>
+        </div>
+        <p className="text-xs text-gray-400 text-center max-w-sm">
+          Reemplaza los grupos de WhatsApp con una plataforma privada y segura.
+        </p>
+      </div>
     </div>
   );
 }
