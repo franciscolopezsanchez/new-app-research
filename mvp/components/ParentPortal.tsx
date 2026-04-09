@@ -76,7 +76,7 @@ export default function ParentPortal() {
             {/* Greeting */}
             <div className="mt-2">
               <h2 className="text-lg font-semibold text-gray-900">Hola, Sofía 👋</h2>
-              <p className="text-sm text-gray-500">{dailyReport.date}</p>
+              <p className="text-sm text-gray-500">El día de Pablo · {dailyReport.date}</p>
             </div>
 
             {/* Broadcast announcement */}
@@ -114,7 +114,7 @@ export default function ParentPortal() {
 
                 {/* Teacher note */}
                 <div>
-                  <div className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Nota de Laura</div>
+                  <div className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">Nota de su profesora</div>
                   <p className="text-sm text-gray-700 leading-relaxed">{dailyReport.childReport.note}</p>
                 </div>
 
@@ -158,7 +158,7 @@ export default function ParentPortal() {
             {/* Absent notification */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
               <div className="text-sm font-semibold text-gray-700 mb-1">¿Pablo faltará mañana?</div>
-              <p className="text-xs text-gray-400 mb-3">Avisa al colegio con antelación para que la profesora lo sepa.</p>
+              <p className="text-xs text-gray-400 mb-3">Avisa en un toque. Sin llamadas, sin WhatsApp.</p>
               {absentSubmitted ? (
                 <div className="text-sm text-emerald-700 bg-emerald-50 rounded-xl p-3 text-center">✓ Notificación enviada a Laura</div>
               ) : (
