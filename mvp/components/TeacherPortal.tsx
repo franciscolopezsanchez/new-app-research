@@ -100,7 +100,7 @@ export default function TeacherPortal() {
           <div className="space-y-4">
             <div className="mt-2">
               <h2 className="text-lg font-semibold text-gray-900">Buenos días, Laura 👋</h2>
-              <p className="text-sm text-gray-500">{dailyReport.date}</p>
+              <p className="text-sm text-gray-500">{dailyReport.date} · {teacher.classroom}</p>
             </div>
 
             {/* Stats row */}

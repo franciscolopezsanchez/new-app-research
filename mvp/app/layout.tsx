@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Kindi — Comunicación para escuelas infantiles",
-  description: "La plataforma de comunicación para escuelas infantiles en España",
+  title: "Kindi — El diario digital de tu escuela infantil",
+  description: "Reemplaza los grupos de WhatsApp con una plataforma privada, segura y compatible con el RGPD para escuelas infantiles en España.",
 };
 
 export default function RootLayout({
