@@ -89,6 +89,14 @@ KinderClose is a European-founded platform targeting nurseries and preschools, p
 - Limited public review data; primarily referenced in German early childhood education circles
 - Generally positive among adopters for UX simplicity and daily diary feature
 
+**Firsthand Observations — Director Account (April 2026)**
+
+Registered and explored KinderClose as a school director. Features confirmed live in the product:
+
+- **Recordatorios (fijos y personalizados)**: A dedicated reminder system with two modes. *Fijos* are recurring school-level reminders (e.g., "bring rain boots on Tuesdays"). *Personalizados* are one-off reminders targeted to specific families or the whole school. This is distinct from general messaging — it is a structured, scheduled notification feature, not yet present in our feature list.
+- **Anuarios**: A yearbook feature with photos — end-of-year memory compilation. Overlaps with our Differentiator 2 concept (Child Memory Timeline). Involves physical production logistics (printing, distribution), which makes it a non-trivial operational commitment. **Deferred for our V1/V2 roadmap** due to logistics overhead; revisit when core product is established.
+- **Modelo 233 generado por alumno**: KinderClose generates the Spanish fiscal document Modelo 233 individually for each enrolled child. This is the annual declaration that guarderías are legally required to submit to AEAT (Agencia Tributaria) — it enables working parents to claim the childcare expense deduction in their IRPF return (up to €1,000/year). Currently a largely manual process for most Spanish directors. **This is a major Spain-specific differentiator** — no international competitor has it, and it is a hard legal requirement for all guardería operators in Spain.
+
 ---
 
 ### 2. ClassDojo

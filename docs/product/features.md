@@ -210,7 +210,48 @@ See `user-personas.md` for persona context (Carmen = director, Laura = teacher, 
 
 ---
 
-### Differentiator 5 — School-Level Analytics for Directors
+### Differentiator 5 — Modelo 233 Auto-Generation (Spain-Specific)
+
+**Hypothesis**: Every Spanish guardería (0–3) is legally required to submit Modelo 233 to AEAT each January — an annual declaration listing all enrolled children and fees paid per family, which parents use to claim the childcare IRPF deduction (up to €1,000/year per working mother). Most directors currently handle this manually with spreadsheets, making it a painful, error-prone annual task. A product that generates individual Modelo 233 certificates per child automatically — from billing data already in the system — removes a real pain point and is a direct sales argument.
+
+**What it looks like**:
+- Each academic year, the system accumulates monthly fee records per family
+- In January, the director triggers "Generate Modelo 233" from the dashboard
+- The app produces one certificate per child with the required AEAT fields (NIF del titular, NIF del menor, importe anual, período)
+- Certificates are shared digitally with each family via the parent app
+- Optional: export of the full school-level XML/CSV in the format AEAT accepts for electronic submission
+
+**Why it differentiates**: No international competitor (ClassDojo, Brightwheel, Famly, KinderClose) has this — it is Spain-exclusive and legally mandated. This is not a nice-to-have; it is a compliance feature every guardería director must handle annually. A product that handles it automatically is replacing hours of manual admin work with a single button press. Extremely compelling in a sales conversation with directors. First mover advantage is real here — this feature does not exist in any current widely-used Spanish preschool tool.
+
+**Validation needed**: Confirm with 3 directors how they currently produce Modelo 233 (spreadsheet, external accountant, word processor). Confirm whether the billing module is a prerequisite or whether manual fee input is acceptable for V1 of this feature.
+
+**Complexity**: Medium. Requires a fee/billing data model (even if simple) and knowledge of AEAT's Modelo 233 field schema. No external API needed — purely internal generation. Legal review of output format required.
+
+**Priority**: Should Have for V2 (requires billing module as prerequisite); fast-track if director interviews rank Modelo 233 pain as top-3.
+
+---
+
+### Differentiator 6 — Recordatorios (Fijos y Personalizados)
+
+**Hypothesis**: Teachers and directors need to send structured, scheduled reminders to families — distinct from conversation messages. Examples: "Bring a warm jacket tomorrow," "No school on Friday," "Return the signed permission form by Wednesday." Today this is done via WhatsApp broadcasts, which are informal, untracked, and GDPR non-compliant. A dedicated reminder system with recurrence and targeting gives directors a reliable, logged channel for operational notices.
+
+**What it looks like**:
+- **Fijos (recurring)**: Director or teacher creates a standing reminder that fires on a schedule (e.g., every Monday: "Music class today — bring the recorder"). Set once, runs automatically.
+- **Personalizados (one-off)**: Targeted reminder sent to a specific family, a class, or the whole school. Scheduled for a specific date/time. Read receipt tracked.
+- Reminders appear as a distinct notification type in the parent app (visually different from messages) so parents know they are time-sensitive operational notices, not conversation threads.
+- Director dashboard shows reminder delivery and open rates.
+
+**Why it differentiates**: Observed firsthand in KinderClose's product — it is a feature type competitors like ClassDojo and Brightwheel either omit or fold into general messaging, losing the clarity of intent. A structured reminder system reduces parent anxiety ("Did I miss something important?") and reduces teacher message volume.
+
+**Validation needed**: Ask Laura (teacher persona) whether structured reminders vs. broadcast messages is a meaningful distinction to her daily workflow.
+
+**Complexity**: Low-Medium. Mostly scheduling logic on top of existing notification infrastructure. Recurrence rules (cron-like) add backend complexity.
+
+**Priority**: Should Have for V1.1.
+
+---
+
+### Differentiator 7 — School-Level Analytics for Directors (previously Differentiator 5)
 
 **Hypothesis**: Directors make decisions (staffing, marketing, enrollment) with very little data. A product that surfaces engagement metrics gives directors a business intelligence layer they do not have today.
 
