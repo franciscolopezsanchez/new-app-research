@@ -84,7 +84,7 @@ The monolith is NOT a compromise. It is the deliberate architecture for this sca
 | Database | PostgreSQL (single cluster) | Row-level security for tenant isolation, JSONB for flexible activity logs |
 | Real-time | Socket.IO + Redis adapter | Mature WebSocket library, horizontal scaling via Redis, no third-party data processor |
 | Media storage | Tigris (S3-compatible, EU) | S3-compatible API, EU data residency, no egress fees |
-| Auth | JWT + refresh tokens (jose) | Stateless, works offline, mobile-friendly, no third-party identity dependency |
+| Auth | Supabase Auth | EU Frankfurt, handles email/password + Google/Apple social login, invite flow, password reset — no custom auth code |
 | Hosting | Fly.io (Frankfurt) | EU residency, simple deployment, Postgres managed option |
 
 ### 1.4 What We Are NOT Building in V1
@@ -239,22 +239,34 @@ Access control model:
 
 For video: store the original upload. Use a background Oban job to transcode to H.264/AAC MP4 using `ffmpeg` running on the server for V1. At Year 3 scale, evaluate moving to a managed transcoding service. Do NOT use Mux in V1 — it is US-based and overkill for 60-second videos at this scale.
 
-### 2.8 Auth: JWT + Refresh Tokens (via jose)
+### 2.8 Auth: Supabase Auth
 
-**Use the `jose` library (lightweight, standards-compliant) with short-lived access tokens and long-lived refresh tokens stored in HttpOnly cookies for web, and in secure device storage for mobile.**
+**Use Supabase Auth. Do not build a custom auth system.**
 
-Token strategy:
-- Access token: 15-minute expiry, signed JWT, contains `user_id`, `school_id`, `role`
-- Refresh token: 30-day expiry, stored in PostgreSQL (allows server-side revocation), rotated on each refresh
+Supabase Auth (EU Frankfurt region) handles everything we would otherwise build ourselves:
+- Email/password login with secure password hashing
+- Social login — Google and Apple (relevant for Spanish parents)
+- Password reset via email (magic link)
+- Invite flow — director invites staff and parents by email; Supabase sends the link
+- Session management and refresh token rotation
+- JWT issuance
 
-Three user roles are encoded in the JWT:
-- `director` — full access to their school's data
-- `teacher` — access to assigned classrooms
-- `parent` — access only to their own children's data
+Supabase stores auth data in an internal `auth.users` table in our Frankfurt instance — data does not leave the EU. A GDPR DPA is included with Supabase.
+
+**Custom JWT claims:** A PostgreSQL hook function injects `school_id` and `role` into every JWT at issue time, sourced from our `public.users` table. RLS policies read these claims via `auth.jwt()`. See `database-schema.md` for the hook implementation.
+
+**Role model:**
+- `DIRECTOR` — full access to their school's data
+- `TEACHER` — access to assigned classrooms
+- `PARENT` — access only to their own children's data
 
 Role-based access is enforced at the Fastify route level using preHandler hooks, not in the frontend.
 
-Do NOT use a third-party auth service (Auth0, Clerk) for V1 for two reasons: (1) they add a GDPR third-party dependency for user identity data, and (2) `jose` + Fastify gives you full control over token revocation and session management with minimal complexity.
+**User creation:** A Postgres trigger on `auth.users` creates the corresponding `public.users` profile row on every sign-up or invite confirmation. `school_id` and `role` are passed as `raw_user_meta_data` when the director invites a new user server-side.
+
+**Mobile:** Expo + Supabase JS client handles token storage in SecureStore automatically.
+
+**Do NOT use Auth0 or Clerk.** Auth0 routes identity data through US infrastructure by default. Clerk has no EU region.
 
 ### 2.9 Hosting / Infrastructure: Fly.io (Frankfurt Region)
 
@@ -1114,7 +1126,7 @@ This is a realistic timeline for a single senior engineer building a production-
 | Email delivery | Buy (Brevo) | Deliverability is a full-time job |
 | SMS alerts | Buy (Vonage) | Carrier relationships required |
 | Payment processing | Buy (Stripe) | PCI DSS compliance is non-trivial |
-| Authentication | Build (jose) | GDPR: no third-party identity dependency |
+| Authentication | Supabase Auth | EU Frankfurt — GDPR-compliant, social login included, no custom auth code |
 | Real-time messaging | Build (Socket.IO) | No third-party data processor for messages |
 | Media storage | Buy (Tigris) | Object storage is a commodity |
 | Error monitoring | Buy (Sentry) | Essential, no-brainer |
