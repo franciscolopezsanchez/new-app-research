@@ -1,0 +1,15 @@
+node_modules
+.env
+.env.local
+.env*.local
+dist
+.turbo
+*.tsbuildinfo
+
+# Expo
+apps/mobile/.expo
+apps/mobile/android
+apps/mobile/ios
+
+# Prisma
+packages/db/generated
