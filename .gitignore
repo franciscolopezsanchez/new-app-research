@@ -13,3 +13,6 @@ apps/mobile/ios
 
 # Prisma
 packages/db/generated
+
+# Supabase
+supabase/snippets
