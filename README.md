@@ -1,31 +1,22 @@
-# Project Documentation
+# Spanish Pre-School App — Project Root
 
-This directory contains all working documentation for the app project.
-It serves as shared context for all agents and team members.
+## What This Is
 
-## Structure
+A SaaS app for Spanish guarderías (pre-schools, ages 0-6) that handles school-parent communication with LOPDGDD compliance and regional language support. Built by a solo technical founder. Currently in validation phase — calling real schools before writing code.
 
-| Folder | Contents |
+## Repository Layout
+
+| Path | Contents |
 |---|---|
-| `strategy/` | Vision, competitive analysis, business model |
-| `product/` | Features, roadmap, user personas, user stories |
-| `marketing/` | GTM plan, channels, messaging, campaigns |
-| `technical/` | Architecture, tech stack, infrastructure |
-| `research/` | Raw research, interviews, market data |
+| `docs/` | All working documentation — strategy, product, research, marketing, technical |
+| `apps/api/` | Backend service (Node.js + Fastify + TypeScript) |
 
-## Key Documents
+## For Agents
 
-- [Vision & Overview](strategy/vision.md)
-- [Competitive Analysis](research/competitive-analysis.md)
-- [Business Model](strategy/business-model.md)
-- [User Personas](product/user-personas.md)
-- [Product Roadmap](product/roadmap.md)
-- [Go-to-Market Plan](marketing/go-to-market.md)
-- [Tech Stack & Architecture](technical/architecture.md)
+All context you need to understand the product, market, decisions, and roadmap lives in [`docs/`](docs/README.md). Start there. The `docs/` README is the master index with links to every key document.
 
-## Validation Phase
-
-- [Validation Plan + Phone Script](research/validation-plan.md)
-- [School Targeting & Scoring System](research/school-targeting.md)
-- [School Candidates CSV](research/school-candidates.csv) — 48 schools across Spain with scoring
-- [Google Sheets Import Guide](research/google-sheets-setup.md)
+Key facts at a glance:
+- **Market:** Spain, guarderías (0-3 / 0-6), ~4,000 addressable schools
+- **Pricing:** €59/month per school (early adopter cohort at €39/month)
+- **Stack:** Node.js/Fastify, React Native/Expo, PostgreSQL, Fly.io Frankfurt
+- **Phase:** Pre-build validation. No production code yet.

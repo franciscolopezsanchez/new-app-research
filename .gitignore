@@ -6,13 +6,4 @@ dist
 .turbo
 *.tsbuildinfo
 
-# Expo
-apps/mobile/.expo
-apps/mobile/android
-apps/mobile/ios
 
-# Prisma
-packages/db/generated
-
-# Supabase
-supabase/snippets
