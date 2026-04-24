@@ -9,7 +9,6 @@ A SaaS app for Spanish guarderías (pre-schools, ages 0-6) that handles school-p
 | Path | Contents |
 |---|---|
 | `docs/` | All working documentation — strategy, product, research, marketing, technical |
-| `apps/api/` | Backend service (Node.js + Fastify + TypeScript) |
 
 ## For Agents
 
