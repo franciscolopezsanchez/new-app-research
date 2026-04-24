@@ -1,8 +1,8 @@
 # Technical Architecture — Preschool Communication Platform
 
-**Version:** 1.1
-**Date:** 2026-03-21
-**Status:** Draft for founder review — updated to Node.js stack
+**Version:** 1.3
+**Date:** 2026-04-25
+**Status:** Draft for founder review — updated to Next.js-only backend, SSE + Polling replaces Socket.IO
 **Scope:** V1 architecture through Year 3 scale (~500 schools, ~60,000 children)
 
 ---
@@ -31,25 +31,24 @@
                           │            EU-Hosted Infrastructure          │
                           │              (Fly.io / Frankfurt)             │
                           │                                               │
-  ┌──────────────┐        │  ┌─────────────┐      ┌──────────────────┐  │
-  │  Teacher App  │◄──────┼──►   API Server │      │  Background Jobs  │  │
-  │  (React Native│  HTTPS│  │  (Node.js / │      │  (BullMQ workers)│  │
-  │   + Expo)     │       │  │  Fastify)   │◄─────►  - Media process │  │
-  └──────────────┘        │  │             │      │  - Notifications  │  │
-                          │  │  REST + WS  │      │  - Retention/del  │  │
-  ┌──────────────┐        │  └──────┬──────┘      │  - Audit flush    │  │
-  │  Parent App   │◄──────┼─────────┤             └──────────────────┘  │
-  │  (React Native│  HTTPS│         │                                     │
-  │   + Expo)     │       │  ┌──────▼──────┐      ┌──────────────────┐  │
-  └──────────────┘        │  │ PostgreSQL   │      │     Redis         │  │
-                          │  │ (primary DB) │      │  (sessions,       │  │
-  ┌──────────────┐        │  │  Row-level   │      │   pub/sub,        │  │
-  │  Web App      │◄──────┼──►  security    │      │   rate limits,    │  │
-  │  (Next.js)    │  HTTPS│  │  per tenant  │      │   offline queue)  │  │
-  └──────────────┘        │  └─────────────┘      └──────────────────┘  │
-                          │                                               │
+  ┌──────────────┐        │  ┌──────────────────────┐  ┌─────────────┐  │
+  │  Teacher App  │◄──────┼──►  Next.js 15 App       │  │  BullMQ     │  │
+  │  (React Native│  HTTPS│  │  - App Router (UI)    │  │  Worker     │  │
+  │   + Expo)     │       │  │  - Route Handlers     │◄─►  - Media    │  │
+  └──────────────┘        │  │    (REST API)         │  │  - Notifs   │  │
+                          │  │  - SSE /api/stream    │  │  - Retention│  │
+  ┌──────────────┐        │  │  - Better Auth        │  │  - Erasure  │  │
+  │  Parent App   │◄──────┼──►    /api/auth/*        │  └──────┬──────┘  │
+  │  (React Native│  HTTPS│  └──────────┬────────────┘         │         │
+  │   + Expo)     │       │             │                       │         │
+  └──────────────┘        │  ┌──────────▼────────────┐  ┌──────▼──────┐  │
+                          │  │ PostgreSQL (Fly)        │  │   Redis     │  │
+  ┌──────────────┐        │  │ Row-level security      │  │ (BullMQ     │  │
+  │  Web Browser  │◄──────┼──►  per tenant             │  │  queues,    │  │
+  │  (Next.js)    │  HTTPS│  └───────────────────────┘  │  rate limits)│  │
+  └──────────────┘        │                              └─────────────┘  │
                           │  ┌───────────────────────────────────────┐   │
-                          │  │  Tigris / Cloudflare R2 (EU bucket)   │   │
+                          │  │  Tigris (EU bucket)                    │   │
                           │  │  Media storage — photos, videos        │   │
                           │  │  Signed URL access, per-child ACL     │   │
                           │  └───────────────────────────────────────┘   │
@@ -78,13 +77,14 @@ The monolith is NOT a compromise. It is the deliberate architecture for this sca
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Backend runtime | Node.js 22 LTS + Fastify + TypeScript | Engineer fluency, strong ecosystem, handles V1-V3 scale comfortably |
-| Mobile | React Native + Expo | Single codebase, offline support, large ecosystem, Expo EAS for OTA |
-| Frontend web | Next.js (React) | Code sharing with mobile, SSR for SEO, strong ecosystem |
+| Backend runtime | Next.js 15 App Router (Route Handlers + Server Actions) | Single deployment for both API and UI — no separate Fastify server needed |
+| Mobile | Expo WebView shell | Wraps Next.js web app — no separate React Native data layer |
+| Frontend web | Next.js 15 App Router | Serves all UI and all API routes in one app |
 | Database | PostgreSQL (single cluster) | Row-level security for tenant isolation, JSONB for flexible activity logs |
-| Real-time | Socket.IO + Redis adapter | Mature WebSocket library, horizontal scaling via Redis, no third-party data processor |
+| Real-time | SSE (`/api/stream`) + polling (`?since=`) | No persistent WebSocket server needed; SSE covers server-push, polling covers everything else |
 | Media storage | Tigris (S3-compatible, EU) | S3-compatible API, EU data residency, no egress fees |
-| Auth | Supabase Auth | EU Frankfurt, handles email/password + Google/Apple social login, invite flow, password reset — no custom auth code |
+| Auth | Better Auth (self-hosted) | Next.js App Router integration, Prisma adapter, JWT cookie cache, email/password + Google/Apple OAuth — all auth data in Fly Postgres Frankfurt |
+| Background jobs | BullMQ worker (separate process, same Fly app) | Redis-backed job queue for push notifications, media transcoding, retention, erasure |
 | Hosting | Fly.io (Frankfurt) | EU residency, simple deployment, Postgres managed option |
 
 ### 1.4 What We Are NOT Building in V1
@@ -105,43 +105,57 @@ The monolith is NOT a compromise. It is the deliberate architecture for this sca
 
 ## 2. Tech Stack Recommendation
 
-### 2.1 Backend: Node.js 22 LTS + Fastify + TypeScript
+### 2.1 Backend: Next.js 15 App Router (Route Handlers + Server Actions)
 
-**Use Node.js 22 LTS with Fastify and TypeScript throughout.**
+**Next.js serves both the UI and the API. There is no separate backend server.**
 
-Node.js is the right choice for this product at this stage: the engineer is fluent in JavaScript, the ecosystem for multi-tenant SaaS is mature, and Node.js handles the real-time and concurrency requirements comfortably at V1–V3 scale (500 schools, 60,000 children).
+This is the correct choice because the mobile app is a WebView shell — all clients (web browsers, Expo WebView, mobile browsers) talk to the same Next.js deployment. Route Handlers replace a dedicated REST API server; Server Actions handle mutations from within Next.js pages. The real-time requirements (see §2.5) are satisfied by SSE and polling, which do not need a persistent WebSocket server.
 
 Specific reasons:
 
-- **Fastify** over Express: better performance, built-in JSON Schema validation, clean plugin architecture for multi-tenant middleware. Schema validation catches malformed API inputs before they reach business logic.
+- **One deployment, one codebase.** No separate Fastify server to maintain, deploy, or debug. `fly deploy` ships everything.
+- **Route Handlers** (`app/api/v1/...`) handle all REST API calls from the Expo shell and external clients. They are standard `Request`/`Response` — compatible with Web APIs, testable in isolation.
 - **TypeScript** throughout: catches tenant-isolation bugs (wrong `school_id`, missing auth checks) at compile time rather than in production. Prisma's generated types give end-to-end type safety from DB schema to API response.
-- **Socket.IO** with Redis adapter: handles WebSocket connections for real-time messaging. At 500 schools with ~100 concurrent parents each, that's 50,000 connections — well within Node.js capacity. The Redis adapter enables horizontal scaling across multiple Fly.io instances transparently.
-- **BullMQ** for background jobs: push notifications, photo processing, retention deletion, audit flushes. Backed by Redis, with retry logic, dead-letter queues, and a dashboard. No separate job runner process needed — workers run as part of the same deployment.
+- **BullMQ** for background jobs: push notifications, photo processing, retention deletion, audit flushes. Backed by Redis, with retry logic and dead-letter queues. Runs as a separate Node.js worker process (`worker/index.ts`) deployed alongside the Next.js app on the same Fly.io machine — triggered by jobs enqueued from Route Handlers.
 - **Prisma** as ORM: excellent TypeScript integration, clean migration tooling, and the ability to drop to raw SQL for RLS-sensitive queries where needed.
 
-**Internal module structure (enforced by TypeScript path aliases and index.ts barrel exports):**
+**Project structure:**
 
 ```
-src/
-  modules/
-    accounts/          # Auth, users, roles
-    schools/           # Tenant management, school settings
-    children/          # Child profiles, parent-child links
-    messaging/         # Direct messages, broadcasts
-    daily-reports/     # Activity logs, meal/nap/mood
-    attendance/        # Attendance records, alerts
-    media/             # Photo/video upload, consent enforcement
-    consent/           # GDPR consent records
-    notifications/     # Push, email, SMS dispatch
-    audit/             # Audit event logging
-    gdpr/              # Retention policies, erasure requests
-  middleware/          # Auth, RLS session, rate limiting
-  jobs/                # BullMQ worker definitions
-  lib/                 # Shared utilities (db client, storage, etc.)
-  app.ts               # Fastify app bootstrap
+app/
+  api/
+    auth/[...all]/     # Better Auth catch-all handler
+    v1/
+      children/        # Child profile CRUD
+      messages/        # Messaging send/receive
+      reports/         # Daily reports
+      attendance/      # Attendance records
+      media/           # Photo/video upload + signed URLs
+      consent/         # GDPR consent management
+      notifications/   # Push token registration
+      gdpr/            # Erasure requests
+      schools/         # School settings
+      stream/          # SSE endpoint (server-push events)
+  (app)/               # Protected app routes (director/teacher/parent UI)
+  (auth)/              # Auth screens (better-auth-ui)
+lib/
+  auth.ts              # Better Auth config
+  db.ts                # Prisma client singleton
+  storage.ts           # Tigris S3 client
+  rls.ts               # RLS session helper
+  jobs.ts              # BullMQ queue definitions
+  auth-middleware.ts   # requireAuth() helper for Route Handlers
+worker/
+  index.ts             # BullMQ worker bootstrap (separate process)
+  jobs/
+    notifications.ts   # Push notification dispatch
+    media.ts           # ffmpeg video transcoding
+    retention.ts       # Nightly data retention enforcement
+    erasure.ts         # GDPR erasure request processor
+    safeguarding.ts    # Scheduled safeguarding alert
 ```
 
-Each module exports a public API via `index.ts`. Cross-module calls go through those exports only — never importing internal files from another module directly. This is the modular monolith boundary enforced by convention and TypeScript imports.
+Cross-module calls stay within `lib/` utilities — never importing Prisma models or job definitions from within `app/api/` routes directly. This is the modular boundary enforced by TypeScript path aliases.
 
 ### 2.2 Database: PostgreSQL 16
 
@@ -156,56 +170,133 @@ PostgreSQL is the correct choice because:
 - **Prisma** has first-class PostgreSQL support. For RLS-sensitive queries, use `prisma.$executeRaw` to set the session variable before queries.
 
 Redis (via Upstash EU Frankfurt) for:
-- Session data and rate limiting counters
-- Socket.IO adapter for multi-node deployments
-- BullMQ job queues
-- Temporary offline sync queue state
+- Rate limiting counters (sliding window per user/IP)
+- BullMQ job queues (push notifications, media processing, retention, erasure)
 
 Do NOT use Redis for anything that must survive a restart. BullMQ jobs use Redis but are designed for at-least-once delivery with retry — for truly durable, ACID-guaranteed operations use PostgreSQL transactions.
 
-### 2.3 Mobile: React Native + Expo (Managed Workflow)
+### 2.3 Mobile: Expo WebView Shell
 
-**Use React Native with Expo SDK (managed workflow) for both iOS and Android.**
+**Use Expo as a thin native shell wrapping the Next.js web app in a WebView.**
 
-This is the right choice for a solo technical founder because:
+The mobile app is not a separate React Native application with its own data layer. It is an Expo project that renders the Next.js web app via `react-native-webview`, plus a native bridge for push notifications and OAuth deep links.
 
-- **Single codebase** for iOS and Android. You cannot afford to maintain two native codebases.
-- **Expo EAS (Expo Application Services)** provides over-the-air (OTA) updates via EAS Update — critical for pushing bug fixes to teachers without waiting for App Store review.
-- **Expo EAS Build** handles iOS/Android builds in CI without requiring a Mac for Android builds.
-- **WatermelonDB** (React Native SQLite wrapper) provides the offline-first database layer with lazy loading and sync primitives — exactly what you need for offline daily reports.
-- **React Native's ecosystem** for this use case (camera, file system, push notifications via Expo Notifications) is mature and well-documented.
+This is the correct choice for MVP because:
 
-The trade-off versus Flutter: Flutter has better performance on low-end Android devices. However, React Native with the New Architecture (Fabric renderer, JSI) is now competitive, and sharing code and engineers with the Next.js web frontend has compounding value. Expo's ecosystem for push notifications and OTA updates is ahead of FlutterFire for this specific feature set.
+- **Zero UI duplication.** One codebase (Next.js) serves both the web portal and mobile. Changes deploy to both simultaneously.
+- **better-auth-ui works as-is.** The shadcn/ui auth components render correctly in a WebView — no mobile-specific auth screens to build.
+- **Dramatically reduced scope.** No WatermelonDB, no offline sync protocol, no native camera integration. Mobile complexity is eliminated for MVP.
+- **Expo EAS Build** handles iOS/Android builds in CI. OTA updates via EAS Update push web app changes without an App Store review cycle.
 
-Do NOT use the Expo Go development client in production. Use Expo's Development Client with a custom native build from the start — you will need the native SQLite and camera modules anyway.
+**What the Expo shell provides:**
+- `react-native-webview` rendering the Next.js web app
+- `expo-notifications` for FCM/APNs push notification registration — the device token is sent to the server on app open; notification payloads contain zero personal data; actual content is fetched from the EU API when the user taps
+- `expo-linking` for deep link handling — required for Google and Apple OAuth callbacks to return to the app rather than orphaning in a browser tab
+- A custom scheme (e.g. `guarda://`) registered as a redirect URI in Google and Apple's OAuth console
 
-### 2.4 Web Frontend: Next.js 15 (App Router)
+**What it does NOT include:**
+- WatermelonDB or any local SQLite database
+- Offline data sync
+- Native camera or file system integration (handled via browser `<input type="file">` in WebView)
+- Any application business logic
 
-**Use Next.js with the App Router for the web application.**
+**Cookie session handling:** Better Auth's JWT cookie sessions work natively in WebView. The WebView maintains its own cookie jar — the HttpOnly JWT cookie is sent on every request automatically. No custom token handling required on the mobile side.
 
-The web app serves two distinct purposes:
+**OAuth flow in WebView:** When a user taps "Sign in with Google", the WebView loads the Google consent screen. After consent, Google redirects to your callback URL. Better Auth completes the OAuth exchange server-side and sets the session cookie. The WebView then navigates to the app's home screen — the flow is identical to web.
 
-1. **Teacher/director portal** — daily report entry (also available on mobile, but some directors prefer desktop for administrative tasks like managing class rosters)
-2. **Parent portal** — viewing reports, photos, messages (many parents will use the app, but having a web fallback is good for accessibility and older device compatibility)
+### 2.4 Web Frontend + API: Next.js 15 (App Router)
+
+**Next.js is both the web application and the API server. Everything runs in one deployment.**
+
+Because the React Native app is a WebView wrapper (§2.3), Next.js serves all users — desktop browsers, mobile browsers, and the Expo WebView shell. There is no separate mobile UI codebase and no separate API server.
+
+The web app serves three distinct user groups:
+1. **Directors** — school administration, staff and parent invitations, school settings, billing
+2. **Teachers** — daily report entry, attendance, messaging, photo upload
+3. **Parents** — viewing their children's reports, photos, messages, consent management
 
 Next.js reasons:
-- Server-side rendering improves perceived performance for parents loading photo galleries on mobile browsers.
-- React component library can be shared (or conceptually aligned) with React Native components.
-- Next.js API routes can serve as a lightweight BFF (Backend for Frontend) layer if needed — though most API calls go directly to the Phoenix backend.
-- Vercel EU region deployment is available and easy to set up, but since we're already on Fly.io, we can deploy Next.js as a Fly.io app in Frankfurt.
+- **better-auth-ui** (shadcn/ui) provides drop-in auth screens (sign in, sign up, forgot password) that match the app's design system. Zero custom auth UI to build.
+- Server-side rendering improves perceived performance for parents loading photo galleries, especially on mid-range Android devices via the WebView.
+- Route Handlers in the App Router handle all REST API calls — same process, no inter-service latency.
+- One `fly deploy` ships UI, API, and auth in a single step.
 
-### 2.5 Real-Time / Messaging: Socket.IO
+### 2.5 Real-Time: SSE + Polling
 
-**Use Socket.IO with the Redis adapter. Do not use a third-party service like Pusher or Ably.**
+**Use Server-Sent Events for server-push and HTTP polling for periodic refreshes. No WebSocket server.**
 
-Socket.IO is production-proven, handles the concurrency requirements of this product comfortably, and keeps message content within your own infrastructure (no third-party GDPR dependency). The Redis adapter enables transparent horizontal scaling across multiple Fly.io nodes.
+This product's real-time traffic pattern is low-frequency and mostly one-directional: a teacher posts a photo or publishes a report, and parents should see it within seconds while they have the app open. This does not require a persistent bidirectional connection.
 
-Message delivery architecture:
-- Each teacher and parent connects via Socket.IO on app open, joining their relevant rooms (e.g. `school:{schoolId}`, `classroom:{classroomId}`).
-- Room membership is enforced server-side on connection using the verified JWT — a parent cannot join a room they have no relationship to.
-- Messages are persisted to PostgreSQL first, then broadcast via `io.to(room).emit(...)`.
-- Push notifications (FCM/APNs) are sent for users who are not currently connected — handled by a BullMQ job triggered after message persistence.
-- If WebSocket connection drops, the client reconnects and fetches missed messages via REST API using a `since` timestamp parameter.
+**SSE (`GET /api/v1/stream`)**
+
+Server-Sent Events are a streaming HTTP response (`Content-Type: text/event-stream`) supported natively in browsers and in Next.js Route Handlers via the Web Streams API. The client opens one long-lived connection; the server pushes events when something relevant happens.
+
+```typescript
+// app/api/v1/stream/route.ts
+export async function GET(request: Request) {
+  const { schoolId } = await requireAuth(request)
+  const encoder = new TextEncoder()
+
+  const stream = new ReadableStream({
+    start(controller) {
+      const send = (event: string, data: unknown) =>
+        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`))
+
+      // Poll for new events every 5 seconds, push only what's new
+      const interval = setInterval(async () => {
+        const events = await getRecentEvents(schoolId, lastSeen)
+        events.forEach(e => send(e.type, e.payload))
+      }, 5000)
+
+      request.signal.addEventListener('abort', () => clearInterval(interval))
+    },
+  })
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  })
+}
+```
+
+SSE events pushed to clients:
+- `message.new` — a direct message or broadcast arrived for this user
+- `report.published` — a daily report was published for a classroom this parent has a child in
+- `media.ready` — a photo/video finished processing and is available to view
+
+**Polling (`GET /api/v1/{resource}?since={isoTimestamp}`)**
+
+For non-urgent content (attendance history, report list, photo gallery), the client fetches on a timer. Every feed endpoint accepts a `since` query parameter and returns only items newer than that timestamp. The client stores the timestamp of the last successful response and uses it on the next poll.
+
+```
+GET /api/v1/messages?since=2026-04-25T10:00:00Z
+→ returns messages received after that time, for this user's school + role
+```
+
+Polling intervals by resource type:
+- Active message thread: 15 seconds (while the user has it open)
+- General notifications badge: 30 seconds
+- Photo gallery / report list: on-focus (when user navigates to the view)
+
+**Push notifications handle the alert layer**
+
+Push notifications (FCM/APNs via Expo) fire when the app is closed or backgrounded. The app does not need to be open for parents to be alerted. SSE and polling only matter while the user has the app in the foreground — their job is to refresh content already on screen without requiring a manual pull-to-refresh.
+
+**Delivery flow for a new message:**
+
+```
+1. Teacher sends message → POST /api/v1/messages
+2. Route Handler persists to PostgreSQL
+3. Route Handler enqueues BullMQ job: { type: 'push_notification', ... }
+4. BullMQ worker dispatches FCM push to all offline recipients
+5. Any recipient currently connected via SSE receives message.new event within 5s
+6. Any recipient not connected via SSE sees the message next time they open the thread (polling)
+```
+
+No Redis pub/sub is needed for event distribution — the SSE endpoint polls PostgreSQL directly. At V1 scale (500 schools, low concurrent users per school) a 5-second DB poll is trivially cheap.
 
 ### 2.6 Push Notifications: Firebase Cloud Messaging (FCM) + APNs via FCM
 
@@ -237,36 +328,93 @@ Access control model:
 - The server checks consent and family relationship before generating a signed URL
 - Public access on the bucket is disabled — no object is ever publicly accessible
 
-For video: store the original upload. Use a background Oban job to transcode to H.264/AAC MP4 using `ffmpeg` running on the server for V1. At Year 3 scale, evaluate moving to a managed transcoding service. Do NOT use Mux in V1 — it is US-based and overkill for 60-second videos at this scale.
+For video: store the original upload. Use a background BullMQ job to transcode to H.264/AAC MP4 using `ffmpeg` running on the server for V1. At Year 3 scale, evaluate moving to a managed transcoding service. Do NOT use Mux in V1 — it is US-based and overkill for 60-second videos at this scale.
 
-### 2.8 Auth: Supabase Auth
+### 2.8 Auth: Better Auth
 
-**Use Supabase Auth. Do not build a custom auth system.**
+**Use Better Auth with the Prisma adapter. Do not build a custom auth system, and do not use Supabase Auth.**
 
-Supabase Auth (EU Frankfurt region) handles everything we would otherwise build ourselves:
+Better Auth is a self-hosted, framework-agnostic TypeScript authentication library. It integrates with Next.js App Router via a catch-all Route Handler, uses the same Fly Postgres database via Prisma, and sends no auth data to third-party infrastructure. All auth data stays in Frankfurt.
+
+**What Better Auth handles:**
 - Email/password login with secure password hashing
-- Social login — Google and Apple (relevant for Spanish parents)
-- Password reset via email (magic link)
-- Invite flow — director invites staff and parents by email; Supabase sends the link
-- Session management and refresh token rotation
-- JWT issuance
+- Social login — Google and Apple OAuth (relevant for Spanish parents and teachers)
+- Password reset via email (magic link, sent through Brevo)
+- Session management with configurable expiry and automatic refresh
+- JWT cookie cache — sessions issued as signed stateless JWTs in HttpOnly cookies, eliminating a database lookup on every request
 
-Supabase stores auth data in an internal `auth.users` table in our Frankfurt instance — data does not leave the EU. A GDPR DPA is included with Supabase.
+**What we build on top:**
+- Custom invitation flow (§6.3) — director invites staff and parents by email; a signed token is generated, sent via Brevo, validated on click, and the appropriate `app_users` / `staff` / `parent_child_links` record is created
+- Role injection — `app_users.role` is fetched once per request in the `requireAuth()` helper and returned to the Route Handler
 
-**Custom JWT claims:** A PostgreSQL hook function injects `school_id` and `role` into every JWT at issue time, sourced from our `public.users` table. RLS policies read these claims via `auth.jwt()`. See `database-schema.md` for the hook implementation.
+**Better Auth tables (managed by the library — do not modify directly):**
+
+| Table | Purpose |
+|-------|---------|
+| `user` | Auth identity: id, name, email, emailVerified, image, createdAt, updatedAt |
+| `session` | Session records (backing store even in JWT cache mode) |
+| `account` | OAuth provider credentials (Google, Apple tokens) |
+| `verification` | Magic link and email verification tokens |
+
+Your domain tables (`app_users`, `staff`, `schools`, etc.) reference `user.id` as a foreign key. See §3.1.
+
+**Next.js App Router integration:**
+
+Better Auth mounts at `app/api/auth/[...all]/route.ts` as a catch-all Route Handler:
+
+```typescript
+// lib/auth.ts
+export const auth = betterAuth({
+  database: prismaAdapter(prisma, { provider: 'postgresql' }),
+  session: {
+    cookieCache: {
+      enabled: true,
+      maxAge: 60 * 60, // 1-hour stateless JWT, auto-refreshed
+    },
+  },
+  emailAndPassword: { enabled: true },
+  socialProviders: {
+    google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET },
+    apple:  { clientId: env.APPLE_CLIENT_ID,  clientSecret: env.APPLE_CLIENT_SECRET },
+  },
+  trustedOrigins: [env.WEB_ORIGIN],
+})
+
+// app/api/auth/[...all]/route.ts
+import { auth } from '@/lib/auth'
+export const { GET, POST } = auth.handler
+```
+
+**`requireAuth` helper (used in every protected Route Handler):**
+
+```typescript
+// lib/auth-middleware.ts
+export async function requireAuth(request: Request) {
+  const session = await auth.api.getSession({ headers: request.headers })
+  if (!session) throw new Response('Unauthorized', { status: 401 })
+
+  const appUser = await prisma.appUser.findUnique({ where: { authUserId: session.user.id } })
+  if (!appUser) throw new Response('No profile', { status: 403 })
+
+  // Set RLS session variable for all DB queries in this request scope
+  await prisma.$executeRaw`SELECT set_config('app.school_id', ${appUser.schoolId}, true)`
+
+  return { id: appUser.id, schoolId: appUser.schoolId, role: appUser.role }
+}
+```
+
+**Token storage:**
+- **Web:** JWT in HttpOnly + Secure + SameSite=Strict cookie — inaccessible to JavaScript, XSS-safe
+- **Mobile (WebView):** Same cookie, managed automatically by the WebView's cookie jar — no custom handling required
 
 **Role model:**
 - `DIRECTOR` — full access to their school's data
-- `TEACHER` — access to assigned classrooms
-- `PARENT` — access only to their own children's data
+- `TEACHER` — access to assigned classrooms only
+- `PARENT` — access to their own children's data only (enforced by RLS + application layer)
 
-Role-based access is enforced at the Fastify route level using preHandler hooks, not in the frontend.
+Role-based access is enforced in Route Handler middleware (`requireAuth()`), not in the frontend.
 
-**User creation:** A Postgres trigger on `auth.users` creates the corresponding `public.users` profile row on every sign-up or invite confirmation. `school_id` and `role` are passed as `raw_user_meta_data` when the director invites a new user server-side.
-
-**Mobile:** Expo + Supabase JS client handles token storage in SecureStore automatically.
-
-**Do NOT use Auth0 or Clerk.** Auth0 routes identity data through US infrastructure by default. Clerk has no EU region.
+**Do NOT use:** Auth0 (routes identity through US infrastructure by default), Clerk (no EU region), Supabase Auth (eliminated — auth data must not be split from application data across separate hosting).
 
 ### 2.9 Hosting / Infrastructure: Fly.io (Frankfurt Region)
 
@@ -274,21 +422,23 @@ Role-based access is enforced at the Fastify route level using preHandler hooks,
 
 Fly.io advantages for this use case:
 - Excellent Node.js support — Docker-based deployment, `fly deploy` from CI, no Kubernetes needed.
-- Managed PostgreSQL (Fly Postgres) in Frankfurt — or use Supabase EU (Frankfurt) for a more managed experience with built-in connection pooling (PgBouncer).
+- Managed PostgreSQL (Fly Postgres) in Frankfurt — same private network as the app, no public internet exposure.
 - Simple deployment model — `fly deploy` from CI. No Kubernetes, no ECS task definitions.
 - Private networking between services (no public internet between app and database).
-- Socket.IO horizontal scaling via the Redis adapter — multiple Fly.io nodes share WebSocket state transparently through Redis.
+- SSE connections are stateless relative to the server — horizontal scaling works without a shared message bus.
 - Reasonable cost at this scale — a 2-node app cluster + managed Postgres + Redis starts under €100/month.
 
-Use **Supabase (EU Frankfurt region)** for PostgreSQL over Fly Postgres for these reasons:
-- Built-in PgBouncer connection pooling (critical for Elixir's many short-lived DB connections)
-- Point-in-time recovery out of the box
-- Easy database migrations with a web UI (useful when you're the sole engineer)
-- Row-Level Security tooling in the Supabase dashboard
+Use **Fly Postgres (Frankfurt region)** for PostgreSQL.
 
-Supabase's EU Frankfurt region stores all data in Frankfurt. Their DPA (Data Processing Agreement) is GDPR-compliant.
+Fly Postgres runs inside the same Fly.io private network as the application — the database is never exposed to the public internet. Advantages:
+- Private networking between app and database via Fly.io's WireGuard mesh — no connection string exposed, no egress fees
+- Frankfurt region for EU data residency
+- Point-in-time recovery and automated daily backups included
+- PgBouncer connection pooling sidecar available via `fly.toml`
+- Billed as part of the Fly.io account — no separate database service to manage or sign a DPA with
+- Prisma migrations are the schema management tool — no need for a database web UI
 
-**Infrastructure as Code:** Use Fly.io's `fly.toml` for app configuration and keep it in the repository. Do NOT use Terraform in V1 — the infrastructure is simple enough that `fly.toml` + Supabase dashboard is sufficient.
+**Infrastructure as Code:** Use Fly.io's `fly.toml` for app configuration and keep it in the repository. Do NOT use Terraform in V1 — the infrastructure is simple enough that `fly.toml` + Prisma migrations is sufficient.
 
 ### 2.10 CI/CD: GitHub Actions
 
@@ -337,9 +487,9 @@ Parent (Guardian)
   ├── has many ParentChildLinks
   └── has many NotificationPreferences
 
-User (authentication identity)
-  ├── polymorphic: belongs to Staff OR Parent
-  └── has many RefreshTokens
+User (Better Auth identity — auth.user table)
+  ├── has one AppUser (your domain profile: school_id, role)
+  └── AppUser polymorphic: belongs to Staff OR Parent
 
 DailyReport
   ├── belongs to Classroom
@@ -534,7 +684,7 @@ CREATE TABLE media_child_tags (
 );
 ```
 
-**Critical constraint:** A `media_child_tags` row cannot be inserted unless a valid `consent_records` row exists for the child with `consent_type = 'photo_sharing'` and `status = 'granted'`. This is enforced via a PostgreSQL trigger and in the Elixir application layer (defense in depth).
+**Critical constraint:** A `media_child_tags` row cannot be inserted unless a valid `consent_records` row exists for the child with `consent_type = 'photo_sharing'` and `status = 'granted'`. This is enforced via a PostgreSQL trigger and in the Node.js application layer (defense in depth).
 
 #### Message
 
@@ -613,7 +763,8 @@ All data — user accounts, messages, photos, videos, audit logs — resides in 
 
 | Component | Provider | Location |
 |-----------|----------|----------|
-| Application database | Supabase (PostgreSQL) | Frankfurt, Germany |
+| Application database | Fly Postgres (PostgreSQL) | Frankfurt, Germany |
+| Auth data | Better Auth (self-hosted, same DB) | Frankfurt, Germany |
 | Redis cache | Upstash | EU (Frankfurt) |
 | Media storage | Tigris | EU (Frankfurt) |
 | Application servers | Fly.io | Frankfurt, Germany |
@@ -623,8 +774,7 @@ All data — user accounts, messages, photos, videos, audit logs — resides in 
 **Push notification note:** FCM infrastructure routes through Google's global network. The push notification payload must never contain personal data or message content — only a notification ID. The receiving device calls your EU-hosted API to fetch the actual content. This architecture means personal data never leaves the EU.
 
 **Data Processing Agreements (DPAs) required with:**
-- Supabase — available, signed at account level
-- Fly.io — available on request
+- Fly.io — available on request (covers both app servers and Fly Postgres)
 - Tigris — available (Fly.io subsidiary)
 - Brevo — standard GDPR DPA included
 - Stripe — standard DPA included
@@ -722,7 +872,7 @@ Implementation: Erasure requests create an `ErasureRequest` record with status `
 **In transit:** TLS 1.3 mandatory for all connections. HSTS enforced. Fly.io handles TLS termination at the edge.
 
 **At rest:**
-- Database: Supabase (PostgreSQL) encrypts the storage volume at rest (AES-256). This is infrastructure-level encryption.
+- Database: Fly Postgres encrypts the storage volume at rest (AES-256). This is infrastructure-level encryption.
 - Media: Tigris encrypts all objects at rest (AES-256).
 - Field-level encryption: Encrypt sensitive fields in the application layer before they reach the database (use `@noble/ciphers` or Node.js native `crypto` AES-256-GCM). Fields requiring field-level encryption:
   - `children.medical_notes`
@@ -748,89 +898,17 @@ A Data Protection Officer (if the school is large enough to require one, or if y
 
 ## 5. Offline Architecture
 
-### 5.1 Offline Feature Scope
+**Offline support is deferred post-MVP.**
 
-| Feature | Offline Support | Rationale |
-|---------|----------------|-----------|
-| Daily report entry | Full offline | Primary use case for offline |
-| Photo capture and tagging | Capture offline, sync when online | Teacher in garden, poor WiFi |
-| Video capture | Capture offline, sync when online | Same as photos |
-| Attendance marking | Full offline | Morning routine, unreliable network |
-| Messaging (compose) | Queue offline, send when online | Teacher can draft messages |
-| Messaging (receive) | Read cached messages only | Cannot receive new messages offline |
-| Class roster viewing | Read cached data | Needed to know who is in class |
-| Push notifications | Not available offline | By definition requires connectivity |
+The React Native app is an Expo WebView shell — it renders the Next.js web app and has no local data layer. All features require an active internet connection for MVP.
 
-### 5.2 Client-Side Storage
+This is an explicit product decision, not an oversight. The target user (teachers in Spanish guarderías) is on WiFi or mobile data during working hours. Offline support adds significant engineering complexity (sync protocol, conflict resolution, local schema, GDPR implications for locally-stored child data) that is not justified before product-market fit is established.
 
-**Use WatermelonDB for React Native (mobile) and IndexedDB via Dexie.js for the web app.**
+**Post-MVP offline path (if validated as a real need):**
+- Web app: Service Worker + Cache API for read-only offline access to the last-loaded state
+- Native app: Upgrade from WebView wrapper to a full React Native implementation with WatermelonDB for offline daily reports and attendance marking
 
-WatermelonDB is built on SQLite (via Expo SQLite) and is designed specifically for React Native offline-first apps. Its key feature is lazy loading — it does not load all records into memory, making it performant on mid-range Android devices.
-
-Local schema (mobile):
-
-```
-LocalDailyReport    — mirrors server DailyReport + sync metadata
-LocalActivityEntry  — per-child overrides
-LocalAttendance     — attendance records
-LocalChild          — class roster (cached at login/refresh)
-LocalMessage        — last 30 days of messages
-LocalMedia          — pending uploads (path to local file + metadata)
-SyncState           — last sync timestamp per resource type
-```
-
-Each local record has:
-- `server_id` — UUID from server (null until synced)
-- `local_id` — UUID generated on device
-- `sync_status` — `synced | pending | conflict | error`
-- `created_locally_at` — device timestamp
-- `updated_locally_at` — device timestamp
-
-### 5.3 Sync Strategy
-
-**Strategy: Last-write-wins with conflict detection, server is authoritative.**
-
-Sync runs automatically when network connectivity is detected (via `NetInfo` from `@react-native-community/netinfo`). Manual sync is also available via pull-to-refresh.
-
-Sync protocol:
-
-```
-1. PULL: GET /api/v1/sync?since={last_sync_timestamp}&resources=children,classrooms,messages
-   → Server returns all changes since last sync
-   → Client merges, preferring server data for shared resources (class rosters, published reports)
-
-2. PUSH: POST /api/v1/sync/push
-   → Client sends all records with sync_status = 'pending'
-   → Payload: array of { local_id, resource_type, operation, data, client_timestamp }
-
-3. CONFLICT RESOLUTION:
-   → For daily reports: if a published report exists on server, client draft is marked 'conflict'
-     Teacher is shown both versions and can choose or merge
-   → For attendance: server wins if record already exists (prevents double-marking)
-   → For media uploads: always accepted as new records (media is additive)
-
-4. RECEIPT: Server returns { local_id → server_id } mapping for all accepted records
-   → Client updates local records with server_id and sync_status = 'synced'
-```
-
-The `since` parameter uses server-side timestamps (not client timestamps) to avoid clock skew issues. The server records `updated_at` on every mutation.
-
-### 5.4 Media Offline Handling
-
-Photos and videos captured offline are stored in the device's local file system (via `expo-file-system`) with a reference in the local WatermelonDB `LocalMedia` table.
-
-When connectivity returns, a background upload job:
-1. Requests a presigned upload URL from the server (POST `/api/v1/media/presign`)
-2. Uploads directly to Tigris using the presigned URL
-3. Notifies the server of completed upload (POST `/api/v1/media/{id}/uploaded`)
-4. Updates the local record's `sync_status` to `synced`
-
-Offline photo tagging: the teacher can tag children from the local roster cache. When synced, the server re-validates consent for each tag before persisting. If consent was revoked between offline capture and sync, the tag is rejected and the teacher is notified.
-
-**GDPR implication:** Photos stored locally on a teacher's device before sync represent a temporary local copy outside your infrastructure. This is unavoidable for offline functionality but must be addressed in:
-- The school's data processing policy (teachers must not transfer work device photos to personal devices)
-- The app's terms of use (offline data is not backed up until synced, teacher accepts responsibility)
-- Local photos are deleted from device storage after successful sync (configurable, but default ON)
+No offline architecture decisions are locked in at this stage.
 
 ---
 
@@ -857,7 +935,7 @@ CREATE POLICY tenant_isolation ON children
   USING (school_id = current_setting('app.school_id')::UUID);
 ```
 
-The Fastify middleware sets `app.school_id` from the authenticated JWT before any database query using a Prisma middleware hook. The RLS policy ensures no query can return rows from a different school.
+The `requireAuth()` helper (§2.8) sets `app.school_id` from the authenticated session before any database query. The RLS policy ensures no query can return rows from a different school.
 
 **Superuser bypass:** A separate `admin` connection role (used only for migrations and internal tooling) bypasses RLS. This role is never used by the application runtime — only by maintenance scripts.
 
@@ -877,20 +955,28 @@ Onboarding a new school is a transactional operation:
 ```
 SchoolOnboarding transaction:
   1. Create School record (generates UUID, assigns slug)
-  2. Create first Staff record with role: director
-  3. Create User record linked to director Staff
-  4. Send welcome email with password setup link
-  5. Create default RetentionPolicy (365 days)
-  6. Create default school Settings
-  7. Log audit event: school.created
-  8. Create Stripe Customer (async BullMQ job, non-blocking)
+  2. Create Better Auth user record for the director
+  3. Create AppUser record (auth_user_id → Better Auth user.id, school_id, role: director)
+  4. Create Staff record linked to AppUser
+  5. Send welcome email via Brevo with a Better Auth magic link (first login)
+  6. Create default RetentionPolicy (365 days)
+  7. Create default school Settings
+  8. Log audit event: school.created
+  9. Create Stripe Customer (async BullMQ job, non-blocking)
 ```
 
-Steps 1–7 run inside a single Prisma `$transaction` — all succeed or all roll back. School setup is complete in under 1 second.
+Steps 1–8 run inside a single Prisma `$transaction` — all succeed or all roll back. School setup is complete in under 1 second.
+
+**Invitation flow (staff and parents):**
+1. Director submits an invitation form (email, role, optionally classroom or child)
+2. Server generates a signed invitation token (UUID stored in an `invitations` table with expiry, role, school_id, and optionally child_id)
+3. Brevo sends the invitation email with a link containing the token
+4. Invitee clicks the link → server validates token → Better Auth account created (or existing account linked) → `AppUser` + `Staff` or `ParentChildLink` record created → token consumed
+5. Invitee is redirected to the app, already authenticated
 
 After onboarding, the director uses the web app to:
 - Create classrooms
-- Invite teachers (email invitation flow)
+- Invite teachers and parents via the invitation flow above
 - Import or manually add children
 - Configure safeguarding alert time
 
@@ -902,20 +988,18 @@ Child import: support CSV import (first name, last name, date of birth, classroo
 
 ### 7.1 Authentication
 
-JWTs are signed with RS256 (asymmetric keys), not HS256. This matters because:
-- The public key can be distributed to any service that needs to verify tokens
-- Compromise of the verification key does not allow token forgery
-- Key rotation is easier (new public key without invalidating old tokens during transition period)
+Better Auth issues sessions as **stateless JWTs stored in HttpOnly cookies** (JWT cookie cache mode). The JWT is signed with a secret key configured as a Fly.io secret — never stored in the database or exposed to the client.
 
 Token storage:
-- **Web:** Access token in memory (JavaScript variable), refresh token in HttpOnly + Secure + SameSite=Strict cookie. The access token is never stored in localStorage or sessionStorage — XSS attacks cannot steal it.
-- **Mobile:** Both tokens stored in Expo SecureStore (iOS Keychain / Android Keystore). Never in AsyncStorage.
+- **Web:** JWT in HttpOnly + Secure + SameSite=Strict cookie. Inaccessible to JavaScript — XSS attacks cannot read or steal it.
+- **Mobile (WebView):** Same cookie, managed automatically by the WebView's cookie jar. No Expo SecureStore or AsyncStorage involved.
 
 Session management:
-- Refresh tokens stored in `refresh_tokens` table with `user_id`, `token_hash`, `expires_at`, `revoked_at`, `device_fingerprint`.
-- Logging out invalidates the refresh token server-side.
-- A director can see all active sessions for their account and revoke any of them.
-- After 3 failed login attempts from the same IP, impose a 5-minute lockout. After 10, require CAPTCHA.
+- Better Auth's `session` table records all active sessions with `userId`, `token`, `expiresAt`, `ipAddress`, `userAgent`.
+- The JWT cookie cache has a 1-hour validity window — after expiry, Better Auth re-queries the session table and issues a fresh JWT transparently.
+- Sessions expire after 7 days by default (configurable). Logging out invalidates the session record server-side and clears the cookie.
+- A director can see all active sessions for their account and revoke any of them via the Better Auth session management API.
+- After 3 failed login attempts from the same IP, impose a 5-minute lockout. After 10, require CAPTCHA. (Implemented in the Route Handler rate-limit layer, not in Better Auth.)
 
 ### 7.2 Authorization
 
@@ -938,7 +1022,7 @@ Role hierarchy and permissions:
 | View/manage consent | Own school | No | Own children |
 | Request data export | Yes (school data) | No | Own data |
 
-Authorization is enforced in Phoenix controller plugs, not in the frontend. Every API endpoint checks the authenticated user's role and relationship to the requested resource before performing any database operation.
+Authorization is enforced in Route Handler middleware, not in the frontend. Every API endpoint calls `requireAuth()` and checks the authenticated user's role and relationship to the requested resource before performing any database operation.
 
 ### 7.3 Media Access Security
 
@@ -961,12 +1045,12 @@ Do NOT generate signed URLs client-side. The Tigris secret key must never leave 
 
 ### 7.4 API Security
 
-- **Rate limiting:** 100 requests/minute per authenticated user, 10 requests/minute for unauthenticated login attempts. Enforced via Redis counter with sliding window.
-- **Input validation:** All inputs validated with Zod schemas at the Fastify route level before reaching business logic. Binary content type validation for media uploads.
+- **Rate limiting:** 100 requests/minute per authenticated user, 10 requests/minute for unauthenticated login attempts. Enforced via Redis counter with sliding window in Route Handler middleware.
+- **Input validation:** All inputs validated with Zod schemas at the Route Handler level before reaching business logic. Binary content type validation for media uploads.
 - **SQL injection:** Impossible via Prisma parameterized queries. Never use string interpolation in raw SQL (`$executeRaw` uses tagged template literals that are parameterized automatically).
-- **CORS:** Strict origin allowlist — only the known web frontend origin is permitted.
-- **Content Security Policy:** Strict CSP headers on the web app. Media served from Tigris, not from the same origin.
-- **Helmet headers:** X-Frame-Options: DENY, X-Content-Type-Options: nosniff, Referrer-Policy: no-referrer.
+- **CORS:** Strict origin allowlist via Next.js `next.config.ts` headers — only the known web frontend origin is permitted for API routes.
+- **Content Security Policy:** Strict CSP headers via `next.config.ts`. Media served from Tigris, not from the same origin.
+- **Security headers:** X-Frame-Options: DENY, X-Content-Type-Options: nosniff, Referrer-Policy: no-referrer — set via Next.js response headers config.
 
 ### 7.5 Child Data Protection
 
@@ -985,14 +1069,14 @@ Beyond standard auth/authz:
 ### 8.1 What Works at 100 Schools, What Breaks at 500
 
 **Works fine through Year 3 without changes:**
-- Single PostgreSQL instance (Supabase scales to the required size easily)
-- Single Node.js application (Node.js handles 50,000+ concurrent WebSocket connections on one node at this load profile)
+- Single Fly Postgres instance (vertical scaling handles this scale comfortably)
+- Single Next.js deployment (SSE connections are lightweight HTTP streams — no WebSocket state to synchronize between nodes)
 - Tigris media storage (object storage is inherently scalable)
 - Current data model and RLS approach
 
 **What to monitor and potentially address at ~300 schools:**
 
-1. **Database connection pooling:** Supabase's built-in PgBouncer handles this. If you add more Phoenix nodes, PgBouncer's pool may need tuning. This is a configuration change, not an architecture change.
+1. **Database connection pooling:** Configure PgBouncer as a sidecar on Fly Postgres. If you add more Node.js nodes, the pool size may need tuning. This is a configuration change, not an architecture change.
 
 2. **Audit log table growth:** The `audit_events` table grows linearly with usage. The monthly partition strategy means you can archive/drop old partitions without locking the table. Start archiving partitions older than 5 years to cold storage (S3 Glacier equivalent in EU).
 
@@ -1004,9 +1088,9 @@ Beyond standard auth/authz:
 
 | Item | Why Defer |
 |------|-----------|
-| Read replicas | Not needed until query performance degrades. Supabase makes this one click when needed. |
+| Read replicas | Not needed until query performance degrades. Fly Postgres read replicas are a `fly postgres create --replica` command when needed. |
 | CDN for media | Tigris has edge caching built in. Only need a dedicated CDN if serving globally, which is not the plan. |
-| Separate notification service | Oban handles V1 scale. Extract if notification volume warrants dedicated workers. |
+| Separate notification service | BullMQ handles V1 scale. Extract if notification volume warrants dedicated workers. |
 | Full-text search service | PostgreSQL FTS handles Spanish text search adequately through Year 3. Elastic/Typesense deferred. |
 | Event sourcing / CQRS | Premature for this domain. Add if reporting requirements become complex. |
 | Separate read model for analytics | Deferred until you have a dashboard product to build. |
@@ -1015,15 +1099,15 @@ Beyond standard auth/authz:
 
 ```
 V1 (now – Year 1):
-  Supabase PostgreSQL, single instance, Frankfurt
-  Connection pooling via PgBouncer (built-in)
+  Fly Postgres, single instance, Frankfurt
+  Connection pooling via PgBouncer sidecar
 
 V2 (Year 2–3):
   Add read replica for reporting queries
   Archive audit_events partitions > 2 years to cold storage
 
 V3 (if needed, Year 4+):
-  Evaluate vertical scaling (larger instance) before horizontal
+  Evaluate vertical scaling (larger Fly machine) before horizontal
   If horizontal: Citus for partitioning by school_id (transparent to application)
   At this point: re-evaluate if some schools are large enough to warrant dedicated schemas
 ```
@@ -1039,24 +1123,26 @@ The correct order is always: optimize queries first, add indexes second, scale v
 The order matters. Build in this sequence to unblock everything else:
 
 **Week 1–2: Foundation**
-- Fly.io + Supabase setup, CI/CD pipeline (GitHub Actions → fly deploy)
-- Node.js + Fastify + TypeScript project scaffold with module structure
-- PostgreSQL schema + Prisma setup: School, User, Staff, Child, Classroom, ParentChildLink
-- JWT authentication (jose): login, refresh, logout
-- Row-Level Security setup and test (Prisma middleware for `set_config`)
-- Expo React Native project scaffold + WatermelonDB local schema
+- Fly.io + Fly Postgres setup, CI/CD pipeline (GitHub Actions → fly deploy)
+- Next.js 15 + TypeScript project scaffold with App Router and Route Handlers
+- PostgreSQL schema + Prisma setup: School, AppUser, Staff, Child, Classroom, ParentChildLink
+- Better Auth setup: Prisma adapter, JWT cookie cache, email/password, Google + Apple OAuth — mounted at `app/api/auth/[...all]/route.ts`
+- Row-Level Security setup and test (`requireAuth()` sets `SET LOCAL app.school_id`)
+- better-auth-ui auth screens (sign in, sign up, forgot password)
+- BullMQ worker scaffold (`worker/index.ts`) deployed as a separate process on the same Fly machine
+- Expo WebView shell: react-native-webview + expo-notifications + expo-linking
 
 **Week 3–4: Multi-tenancy + Auth**
 - School onboarding flow (API + web UI)
 - Invitation flow (director invites teacher, director invites parent)
-- Role-based access enforcement (director/teacher/parent Fastify preHandlers)
+- Role-based access enforcement (director/teacher/parent via `requireAuth()` in Route Handlers)
 - User profile management
 - Basic Next.js web app with auth
 
 **Week 5–6: Attendance**
 - Attendance data model + API
 - Attendance marking UI (React Native — fast mobile-first)
-- Offline attendance marking (WatermelonDB + sync)
+- Attendance marking UI (online only for MVP)
 - Safeguarding alert job (BullMQ scheduled job at configurable time)
 - Push notifications for attendance (FCM setup)
 
@@ -1079,16 +1165,17 @@ The order matters. Build in this sequence to unblock everything else:
 - GDPR: local photo deletion after sync
 
 **Week 13–14: Messaging**
-- Message data model + API
-- Socket.IO setup for real-time delivery (Redis adapter for multi-node)
+- Message data model + API (Route Handlers)
+- SSE endpoint (`/api/v1/stream`) — server pushes `message.new` events to connected clients
+- Polling fallback for thread view (`?since=` parameter on messages endpoint)
 - Direct messaging UI (teacher ↔ parent)
 - Class broadcast UI (teacher → class, one-way)
 - School broadcast UI (director → school)
-- Message push notifications
+- Message push notifications (BullMQ job for offline recipients)
 
 **Week 15–16: GDPR + Compliance**
 - Consent management UI (parent gives/revokes consent)
-- Retention policy enforcement (Oban nightly job)
+- Retention policy enforcement (BullMQ nightly job)
 - Erasure request flow (API + job)
 - Audit log views for director
 - DSAR data export
@@ -1126,8 +1213,8 @@ This is a realistic timeline for a single senior engineer building a production-
 | Email delivery | Buy (Brevo) | Deliverability is a full-time job |
 | SMS alerts | Buy (Vonage) | Carrier relationships required |
 | Payment processing | Buy (Stripe) | PCI DSS compliance is non-trivial |
-| Authentication | Supabase Auth | EU Frankfurt — GDPR-compliant, social login included, no custom auth code |
-| Real-time messaging | Build (Socket.IO) | No third-party data processor for messages |
+| Authentication | Better Auth (self-hosted) | Runs in-process, Prisma adapter, all data in Fly Postgres Frankfurt — no third-party auth host |
+| Real-time messaging | Build (SSE + polling, native to Next.js) | No third-party dependency; SSE is a native HTTP feature, no persistent WebSocket server |
 | Media storage | Buy (Tigris) | Object storage is a commodity |
 | Error monitoring | Buy (Sentry) | Essential, no-brainer |
 | Video transcoding | Build V1 (ffmpeg + BullMQ) | Low volume, no managed EU option that's simple |
@@ -1208,10 +1295,10 @@ Billing model: School pays monthly or annually. Pricing tiers by number of child
 
 | Category | Service | Monthly Cost (est. V1) | GDPR Compliant |
 |----------|---------|----------------------|----------------|
-| Hosting | Fly.io (Frankfurt) | ~€40 | Yes |
-| Database | Supabase (Frankfurt) | ~€25 | Yes (DPA available) |
+| Hosting + DB | Fly.io Frankfurt (app + Fly Postgres) | ~€55 | Yes (DPA available) |
+| Auth | Better Auth (self-hosted, no extra cost) | €0 | Yes (data stays in Fly Postgres) |
 | Cache | Upstash Redis (EU) | ~€10 | Yes |
-| Media Storage | Tigris | ~€5 | Yes (EU) |
+| Media Storage | Tigris | ~€5 | Yes (EU, Fly.io subsidiary) |
 | Email | Brevo | ~€25 | Yes (EU-based) |
 | Push | FCM via Expo | Free (at V1 scale) | Conditional (no PII in payloads) |
 | SMS | Vonage | ~€5 (emergency only) | Yes (DPA available) |
@@ -1219,9 +1306,9 @@ Billing model: School pays monthly or annually. Pricing tiers by number of child
 | Analytics | Plausible | ~€9 | Yes |
 | Payments | Stripe | % of revenue | Yes (EU entity) |
 | CI/CD | GitHub Actions | Free (public) / ~€4 | Yes |
-| **Total infrastructure** | | **~€150/month** | |
+| **Total infrastructure** | | **~€135/month** | |
 
-At €150/month infrastructure cost, you need approximately 3-4 paying schools to cover infrastructure. The unit economics are excellent.
+At ~€135/month infrastructure cost, you need 3 paying schools to cover infrastructure. The unit economics are excellent.
 
 ---
 
@@ -1240,18 +1327,18 @@ At €150/month infrastructure cost, you need approximately 3-4 paying schools t
 - Harder: Cannot scale individual modules independently (not needed at this scale)
 - Reversible: A well-structured modular monolith can be split into microservices at specific boundaries if independent scaling becomes necessary
 
-### ADR-002: Elixir + Phoenix over Node.js
+### ADR-002: Better Auth over Supabase Auth
 
-**Status:** Accepted
+**Status:** Accepted (2026-04-24)
 
-**Context:** Real-time messaging (WebSockets), background job processing, high concurrency for push notifications, and long-running processes (offline sync, media processing) are core requirements.
+**Context:** The original architecture used Supabase Auth (EU Frankfurt) for authentication. Auth data was stored in Supabase's `auth.users` table, separate from application data in Fly Postgres. The React Native app was a native WatermelonDB-based client requiring Supabase JS SDK integration.
 
-**Decision:** Use Elixir with Phoenix for the backend.
+**Decision:** Replace Supabase Auth with Better Auth (self-hosted, Prisma adapter, Fly Postgres). Replace the native React Native client with an Expo WebView shell.
 
 **Consequences:**
-- Easier: WebSocket scalability, fault tolerance via OTP, background jobs with Oban
-- Harder: Smaller hiring pool than Node.js/Python, founder must be proficient in Elixir
-- Not reversible easily: Elixir is a significant investment. The founder must be committed to this choice.
+- Easier: All data (auth + application) in one Fly Postgres instance — one DPA, one host, simpler ops. No Supabase JS SDK. Auth screens provided by better-auth-ui (shadcn/ui) for the Next.js web app, reused automatically in the WebView mobile shell.
+- Harder: Custom invitation flow must be implemented (Better Auth has no built-in invite-by-email). Upgrading from WebView to native client later requires rebuilding mobile UI.
+- Accepted trade-off: Invitation flow is ~50 lines of code. WebView is sufficient for MVP; native client upgrade is a concrete future path if offline or performance requirements arise.
 
 ### ADR-003: Shared PostgreSQL Database with RLS for Multi-tenancy
 
@@ -1263,21 +1350,36 @@ At €150/month infrastructure cost, you need approximately 3-4 paying schools t
 
 **Consequences:**
 - Easier: Single migration path, unified monitoring, lower operational overhead
-- Harder: A bug in RLS policy could theoretically expose cross-tenant data (defense: policies are simple and testable; also, Supabase's RLS testing tools help)
+- Harder: A bug in RLS policy could theoretically expose cross-tenant data (defense: policies are simple and testable; write integration tests that assert cross-tenant queries return empty results)
 - Reversible: Can migrate to schema-per-tenant if needed, but this is unlikely to be necessary
 
-### ADR-004: Offline-First Mobile with WatermelonDB
+### ADR-004: Expo WebView Shell over Native React Native Client
 
-**Status:** Accepted
+**Status:** Accepted (2026-04-24, supersedes previous offline-first mobile decision)
 
-**Context:** Teachers in rural Spain may have poor or no connectivity during morning routines. Daily report completion must be possible offline.
+**Context:** The original mobile architecture planned a full React Native client with WatermelonDB for offline-first data, Expo SecureStore for token management, and native camera/file system integration. This significantly increased scope for MVP.
 
-**Decision:** Use WatermelonDB (SQLite via expo-sqlite) as the local database. Sync via a pull-push protocol using server timestamps as the sync cursor.
+**Decision:** Replace the native React Native client with an Expo WebView shell that renders the Next.js web app. Native bridge covers push notifications and OAuth deep links only. Offline support deferred post-MVP.
 
 **Consequences:**
-- Easier: Teachers can always complete their core workflows regardless of connectivity
-- Harder: Sync conflicts must be handled explicitly; photos stored locally before sync are a GDPR consideration; more complex application code
-- Not easily reversible: Offline-first architecture is a foundational decision that affects every mobile feature
+- Easier: No WatermelonDB, no sync protocol, no native camera integration. Mobile is ~2 days of work instead of 4 weeks. better-auth-ui auth screens work in WebView with no changes. One UI codebase for web and mobile.
+- Harder: No offline capability for MVP. Upgrading to native client later requires rebuilding mobile UI. WebView performance ceiling lower than native (acceptable for this use case).
+- Accepted trade-off: Offline is not validated as a requirement yet. Teachers in target schools are on WiFi. Native upgrade is a concrete future path gated on user research confirming offline need.
+
+---
+
+### ADR-005: Next.js-Only Backend, SSE + Polling over Fastify + Socket.IO
+
+**Status:** Accepted (2026-04-25, supersedes Fastify API server and Socket.IO real-time layer)
+
+**Context:** The original architecture used a separate Fastify server for the REST API and WebSocket layer (Socket.IO with Redis adapter), deployed alongside the Next.js web app. The mobile app is an Expo WebView shell with no native data layer. The real-time requirements are low-frequency server-to-client pushes: teacher posts a photo, parent sees it; daily report published, parent is notified.
+
+**Decision:** Eliminate the Fastify server entirely. Next.js App Router handles all HTTP via Route Handlers. Replace Socket.IO with SSE (`/api/v1/stream`) for server-push events and polling (`?since=` query parameter) for periodic refreshes. BullMQ workers remain as a separate process for background jobs.
+
+**Consequences:**
+- Easier: One deployment (`fly deploy`), one codebase, no cross-service latency, no Socket.IO Redis adapter to configure. SSE is a native browser/Web API feature — no library, no extra dependency.
+- Harder: SSE is one-directional (server → client only). If a future feature requires client-to-server real-time events (e.g. collaborative editing, live typing indicators), SSE would need to be supplemented. This is not a requirement for this product.
+- Accepted trade-off: Push notifications (FCM/APNs) already handle the "alert while app is closed" case. SSE handles the "refresh content while app is open" case. Together they cover the full notification surface without a persistent WebSocket connection.
 
 ---
 

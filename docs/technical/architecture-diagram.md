@@ -1,34 +1,25 @@
 # Architecture Diagram
-**Last Updated**: 2026-04-14
+**Last Updated**: 2026-04-25
 
 ```mermaid
 flowchart TD
     subgraph clients["Client Layer"]
-        TA["Teacher App\nReact Native + Expo + WatermelonDB"]
-        PA["Parent App\nReact Native + Expo + WatermelonDB"]
-        WA["Web App\nNext.js"]
-    end
-
-    subgraph supa_auth["Supabase Auth — EU Frankfurt"]
-        AUTH["Email / Password · Google · Apple\nInvite flow · Password reset\nJWT issued with: user_id · school_id · role"]
+        TA["Teacher App\nExpo WebView shell"]
+        PA["Parent App\nExpo WebView shell"]
+        WA["Web Browser"]
     end
 
     subgraph flyio["Fly.io — Frankfurt"]
-        API["API Server\nNode.js 22 + Fastify + TypeScript\nREST + Socket.IO"]
-        WORKERS["BullMQ Workers\nPush · Video · Retention · Safeguarding · Audit"]
-        REDIS["Upstash Redis\nSocket.IO adapter · BullMQ queues · Rate limits"]
-        API <-->|"enqueue / process"| WORKERS
-        API --- REDIS
-        WORKERS --- REDIS
+        NEXT["Next.js 15\nApp Router UI + Route Handlers\nBetter Auth /api/auth/*\nSSE /api/v1/stream"]
+        WORKERS["BullMQ Worker\n(separate process)\nPush · Video · Retention · Erasure · Safeguarding"]
+        REDIS["Upstash Redis\nBullMQ queues · Rate limits"]
+        PG["Fly Postgres\nauth + app data (single DB)\nRow-Level Security per tenant"]
+        NEXT <-->|"enqueue / process"| WORKERS
+        NEXT & WORKERS --- REDIS
+        NEXT -->|"⑤ Prisma queries\nSET LOCAL app.school_id\nRLS blocks cross-tenant access"| PG
     end
 
-    subgraph supa_db["Supabase PostgreSQL — EU Frankfurt"]
-        AUTH_USERS["auth.users\nmanaged by Supabase Auth"]
-        APP_DB["public schema\nusers · classrooms · children\ndaily_reports · media · messages\nattendance · consent · audit"]
-        AUTH_USERS -->|"INSERT trigger\nauto-creates public.users row"| APP_DB
-    end
-
-    TIGRIS["Tigris — EU Frankfurt\nPhoto + Video Storage\nPre-signed upload & download URLs\nZero public access"]
+    TIGRIS["Tigris — EU Frankfurt\nPhoto + Video Storage\nPre-signed URLs · Zero public access"]
 
     subgraph external["External Services"]
         FCM["FCM / APNs\nPush notifications"]
@@ -36,22 +27,23 @@ flowchart TD
         STRIPE["Stripe SEPA\nPayments"]
     end
 
-    TA & PA & WA -->|"① login\nemail/password · Google · Apple"| AUTH
-    AUTH -->|"② JWT returned to client"| TA & PA & WA
-    TA & PA & WA -->|"③ REST + WebSocket\nJWT on every request"| API
-    TA -->|"④ direct upload\nvia pre-signed URL"| TIGRIS
+    TA & PA & WA -->|"① login\nemail/password · Google · Apple"| NEXT
+    NEXT -->|"② JWT cookie\nHttpOnly · Secure · SameSite=Strict"| TA & PA & WA
+    TA & PA & WA -->|"③ REST calls\ncookie on every request"| NEXT
+    TA & PA & WA -->|"④ SSE connection\nserver-push events"| NEXT
+    TA -->|"⑥ direct upload\nvia pre-signed URL"| TIGRIS
     PA & WA -.->|"download via\n15-min signed URL"| TIGRIS
-    API -->|"⑤ Prisma queries\nRLS enforced via JWT claims"| APP_DB
-    WORKERS -->|"⑥"| FCM & BREVO & STRIPE
+    WORKERS -->|"⑦"| FCM & BREVO & STRIPE
 ```
 
 ## Flow Reference
 
 | # | Description |
 |---|---|
-| ① | Client authenticates directly with Supabase Auth — the API server never sees the password |
-| ② | Supabase Auth returns a JWT with `school_id` and `role` injected via a custom PostgreSQL hook |
-| ③ | All API and WebSocket calls go to Fly.io with the JWT in the `Authorization` header |
-| ④ | Media uploads go directly from the client to Tigris via a pre-signed URL — the API server never proxies the file |
-| ⑤ | API server queries Supabase via Prisma; RLS policies read `school_id` + `role` from the JWT, blocking cross-tenant access at DB level |
-| ⑥ | BullMQ workers dispatch push notifications (FCM), emails (Brevo), and payment events (Stripe) |
+| ① | Client authenticates via Better Auth, mounted as a Next.js Route Handler at `/api/auth/*` — email/password, Google, or Apple OAuth |
+| ② | Better Auth sets a signed JWT in an HttpOnly cookie; the WebView cookie jar handles it automatically — no token storage code needed in the Expo shell |
+| ③ | All REST API calls go to Next.js Route Handlers (`/api/v1/*`) with the JWT cookie on every request; `requireAuth()` validates the session and sets the RLS tenant context |
+| ④ | While the user has the app open, a persistent SSE connection (`/api/v1/stream`) delivers server-push events: `message.new`, `report.published`, `media.ready` |
+| ⑤ | Next.js queries Fly Postgres via Prisma; `requireAuth()` runs `SET LOCAL app.school_id = <uuid>` before every request, and RLS policies block any cross-tenant row access at the DB level |
+| ⑥ | Media uploads go directly from the client to Tigris via a short-lived pre-signed URL — Next.js never proxies the file bytes |
+| ⑦ | BullMQ workers (running as a separate process on the same Fly machine) dispatch push notifications (FCM), transactional emails (Brevo), and payment events (Stripe) |
